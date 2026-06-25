@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="マイ資産">
+<meta name="apple-mobile-web-app-title" content="Wallet">
 <meta name="theme-color" content="#ffffff">
-<title>マイ資産</title>
+<title>Wallet</title>
 <style>
   :root{
     --bg:#f5f5f7; --surface:#ffffff; --text:#1d1d1f; --muted:#86868b;
@@ -111,7 +111,7 @@
 </style>
 </head>
 <body>
-<header><h1 id="title">マイ資産</h1></header>
+<header><h1 id="title">Wallet</h1></header>
 
 <div class="wrap">
   <!-- DASHBOARD -->
@@ -231,7 +231,7 @@ function load(){
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
 /* ---------- navigation ---------- */
-const TITLES={dash:"マイ資産",assets:"資産",budget:"家計簿",goal:"予算",settings:"設定"};
+const TITLES={dash:"Wallet",assets:"資産",budget:"家計簿",goal:"予算",settings:"設定"};
 function show(v){
   ["dash","assets","budget","goal","settings"].forEach(k=>{
     document.getElementById("v-"+k).classList.toggle("active",k===v);
