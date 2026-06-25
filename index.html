@@ -227,10 +227,11 @@ const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","
 const INC_CATS=["給与","賞与","その他収入"];
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-const today=()=>new Date().toISOString().slice(0,10);
+const fmtDate=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const today=()=>fmtDate(new Date());
 
 let db=load();
-let curMonth=new Date().toISOString().slice(0,7);
+let curMonth=today().slice(0,7);
 
 function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
@@ -258,7 +259,7 @@ function monthTxns(m){return db.transactions.filter(t=>t.date.slice(0,7)===m);}
 
 function renderDash(){
   document.getElementById("d-total").textContent=yen(totalAssets());
-  const tx=monthTxns(new Date().toISOString().slice(0,7));
+  const tx=monthTxns(today().slice(0,7));
   const inc=tx.filter(t=>t.kind==="income").reduce((s,t)=>s+t.amount,0);
   const exp=tx.filter(t=>t.kind==="expense").reduce((s,t)=>s+t.amount,0);
   document.getElementById("d-inc").textContent=yen(inc);
@@ -350,7 +351,7 @@ function snapshotAll(){
 function shiftMonth(d){
   const [y,m]=curMonth.split("-").map(Number);
   const dt=new Date(y,m-1+d,1);
-  curMonth=dt.toISOString().slice(0,7);
+  curMonth=fmtDate(dt).slice(0,7);
   renderBudget();
 }
 function renderBudget(){
@@ -518,7 +519,7 @@ function renderGoals(){
 
 function openGoal(id){
   const end0=new Date(); end0.setMonth(end0.getMonth()+1);
-  const b=id?db.budgets.find(x=>x.id===id):{name:"",amount:"",start:today(),end:end0.toISOString().slice(0,10),category:""};
+  const b=id?db.budgets.find(x=>x.id===id):{name:"",amount:"",start:today(),end:fmtDate(end0),category:""};
   sheet.innerHTML=`
     <h3>${id?"予算を編集":"予算を追加"}</h3>
     <div class="field"><label>名前</label><input id="g-name" value="${esc(b.name)}" placeholder="例：7月の生活費"></div>
