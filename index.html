@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Wallet">
 <meta name="theme-color" content="#ffffff">
 <title>Wallet</title>
+<script>(function(){var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);})();</script>
 <style>
   :root{
     --bg:#f5f5f7; --surface:#ffffff; --text:#1d1d1f; --muted:#86868b;
@@ -15,8 +16,9 @@
     --c-bank:#0a84ff; --c-stock:#34c759; --c-cash:#ff9f0a; --c-other:#8e8e93; --c-emoney:#af52de;
     --safe-top:env(safe-area-inset-top); --safe-bot:env(safe-area-inset-bottom);
   }
+  :root[data-theme="dark"]{ --bg:#000000; --surface:#1c1c1e; --text:#f5f5f7; --muted:#8e8e93; --line:#2c2c2e; }
   @media (prefers-color-scheme: dark){
-    :root{ --bg:#000000; --surface:#1c1c1e; --text:#f5f5f7; --muted:#8e8e93; --line:#2c2c2e; }
+    :root:not([data-theme]){ --bg:#000000; --surface:#1c1c1e; --text:#f5f5f7; --muted:#8e8e93; --line:#2c2c2e; }
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; padding:0;}
@@ -181,6 +183,15 @@
 
   <!-- SETTINGS -->
   <section id="v-settings" class="view">
+    <h2>表示テーマ</h2>
+    <div class="card pad">
+      <div class="seg" id="theme-seg">
+        <button data-t="auto">システム</button>
+        <button data-t="light">ライト</button>
+        <button data-t="dark">ダーク</button>
+      </div>
+    </div>
+
     <h2>データのバックアップ</h2>
     <div class="card pad">
       <p style="font-size:14px; margin:0 0 4px;">データは端末内にのみ保存されています。機種変更や万一の消失に備えて、ファイルに書き出して保管できます。</p>
@@ -688,6 +699,19 @@ function resetData(){
   db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[]};
   save(); alert("削除しました。");
 }
+
+/* ---------- theme ---------- */
+function applyTheme(t){
+  if(t!=="light"&&t!=="dark") t="auto";
+  if(t==="auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme",t);
+  localStorage.setItem("theme",t);
+  const dark = t==="dark" || (t==="auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", dark?"#000000":"#ffffff");
+  document.querySelectorAll("#theme-seg button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+}
+document.querySelectorAll("#theme-seg button").forEach(b=>b.onclick=()=>applyTheme(b.dataset.t));
+applyTheme(localStorage.getItem("theme")||"auto");
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
