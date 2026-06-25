@@ -12,7 +12,7 @@
   :root{
     --bg:#f5f5f7; --surface:#ffffff; --text:#1d1d1f; --muted:#86868b;
     --line:#e5e5ea; --blue:#0a84ff; --green:#34c759; --red:#ff3b30;
-    --c-bank:#0a84ff; --c-stock:#34c759; --c-cash:#ff9f0a; --c-other:#8e8e93;
+    --c-bank:#0a84ff; --c-stock:#34c759; --c-cash:#ff9f0a; --c-other:#8e8e93; --c-emoney:#af52de;
     --safe-top:env(safe-area-inset-top); --safe-bot:env(safe-area-inset-bottom);
   }
   @media (prefers-color-scheme: dark){
@@ -53,7 +53,7 @@
   .row .amt{font-size:16px; font-weight:500; white-space:nowrap; margin-left:10px;}
   .tag{display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; color:#fff; margin-left:6px; vertical-align:1px;}
   .tag.bank{background:var(--c-bank);} .tag.stock{background:var(--c-stock);}
-  .tag.cash{background:var(--c-cash);} .tag.other{background:var(--c-other);}
+  .tag.cash{background:var(--c-cash);} .tag.other{background:var(--c-other);} .tag.emoney{background:var(--c-emoney);}
   /* bars */
   .bar-line{margin:10px 0;}
   .bar-line .top{display:flex; justify-content:space-between; font-size:14px; margin-bottom:5px;}
@@ -63,6 +63,19 @@
   /* chips */
   .chips{display:flex; flex-wrap:wrap; gap:8px; padding:16px;}
   .chip{font-size:13px; padding:6px 11px; border-radius:10px; background:var(--bg);}
+  /* quick buttons */
+  .qhead{display:flex; align-items:center; justify-content:space-between; margin:18px 4px 8px;}
+  .qhead .t{font-size:13px; font-weight:600; color:var(--muted);}
+  .qhead .e{font-size:13px; color:var(--blue); background:none; border:none; padding:2px 4px;}
+  .qwrap{display:flex; flex-wrap:wrap; gap:8px;}
+  .qbtn{display:flex; flex-direction:column; align-items:flex-start; gap:1px; border:0.5px solid var(--line); background:var(--surface); color:var(--text); border-radius:12px; padding:9px 13px; min-width:88px;}
+  .qbtn .ql{font-size:13px;}
+  .qbtn .qa{font-size:15px; font-weight:600;}
+  .qbtn.exp .qa{color:var(--red);} .qbtn.inc .qa{color:var(--green);} .qbtn.charge .qa{color:var(--c-emoney);}
+  .qbtn:active{opacity:.55;}
+  /* toast */
+  #toast{position:fixed; left:50%; bottom:calc(80px + var(--safe-bot)); transform:translateX(-50%) translateY(20px); z-index:30; background:var(--text); color:var(--bg); font-size:14px; font-weight:500; padding:11px 18px; border-radius:99px; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; max-width:90%; text-align:center;}
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
   /* buttons */
   .btns{display:flex; gap:10px; margin:12px 0 4px;}
   button{font:inherit; cursor:pointer;}
@@ -133,6 +146,9 @@
       <button class="btn primary" onclick="snapshotAll()">残高を記録</button>
     </div>
     <p class="empty" style="padding:10px 16px;">「残高を記録」で、その日の総資産が推移グラフに反映されます。</p>
+
+    <div class="qhead"><span class="t">電子マネーチャージ</span><button class="e" onclick="openChargeManager()">編集</button></div>
+    <div class="qwrap" id="a-charge"></div>
   </section>
 
   <!-- BUDGET -->
@@ -147,6 +163,9 @@
       <div class="tile"><p class="lbl">支出</p><p class="val neg" id="b-exp">¥0</p></div>
       <div class="tile" style="grid-column:1/3;"><p class="lbl">収支</p><p class="val" id="b-bal">¥0</p></div>
     </div>
+    <div class="qhead"><span class="t">よく使う項目</span><button class="e" onclick="openQuickManager()">編集</button></div>
+    <div class="qwrap" id="b-quick"></div>
+
     <h2>明細</h2>
     <div class="card" id="b-list"></div>
     <div class="btns"><button class="btn primary" onclick="openTxn()">＋ 収支を記録</button></div>
@@ -189,9 +208,10 @@
 </nav>
 
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+<div id="toast"></div>
 
 <script>
-const TYPES=[["bank","銀行"],["stock","証券"],["cash","現金"],["other","その他"]];
+const TYPES=[["bank","銀行"],["stock","証券"],["cash","現金"],["emoney","電子マネー"],["other","その他"]];
 const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","その他"];
 const INC_CATS=["給与","賞与","その他収入"];
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
@@ -203,8 +223,10 @@ let curMonth=new Date().toISOString().slice(0,7);
 
 function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
-    if(d&&d.accounts){if(!Array.isArray(d.budgets))d.budgets=[]; return d;}}catch(e){}
-  return {accounts:[], snapshots:[], transactions:[], budgets:[]};
+    if(d&&d.accounts){
+      ["snapshots","transactions","budgets","quickItems","charges"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
+      return d;}}catch(e){}
+  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[]};
 }
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
@@ -518,6 +540,118 @@ function delGoal(id){
   closeSheet(); save();
 }
 
+/* ---------- toast ---------- */
+function toast(msg){const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1700);}
+
+/* ---------- quick items (よく使う) ---------- */
+function renderQuick(){
+  const el=document.getElementById("b-quick");
+  if(!db.quickItems.length){el.innerHTML='<p class="empty" style="padding:6px 4px; text-align:left;">「編集」から、よく使う支出・収入を登録できます。</p>'; return;}
+  el.innerHTML=db.quickItems.map(q=>`
+    <button class="qbtn ${q.kind==='income'?'inc':'exp'}" onclick="quickAdd('${q.id}')">
+      <span class="ql">${esc(q.label)}</span>
+      <span class="qa">${q.kind==='income'?'+':'−'}${yen(q.amount)}</span>
+    </button>`).join("");
+}
+function quickAdd(id){
+  const q=db.quickItems.find(x=>x.id===id); if(!q) return;
+  db.transactions.push({id:uid(),date:today(),amount:q.amount,kind:q.kind,category:q.category,memo:q.label});
+  curMonth=today().slice(0,7);
+  save(); toast(q.label+" を記録しました");
+}
+let qKind="expense";
+function openQuickManager(){
+  sheet.innerHTML=`<h3>よく使う項目</h3>
+    <div class="card" style="margin-bottom:12px;">${
+      db.quickItems.length? db.quickItems.map(q=>`<div class="row" onclick="openQuickItem('${q.id}')">
+        <div class="main"><span class="name">${esc(q.label)}</span><span class="sub">${q.category}</span></div>
+        <span class="amt ${q.kind==='income'?'pos':'neg'}">${q.kind==='income'?'+':'−'}${yen(q.amount)}</span></div>`).join("")
+        : '<p class="empty">まだありません。</p>'}</div>
+    <div class="btns"><button class="btn primary" onclick="openQuickItem()">＋ 新規追加</button></div>`;
+  ov.classList.add("show");
+}
+function openQuickItem(id){
+  const q=id?db.quickItems.find(x=>x.id===id):{label:"",kind:"expense",category:"食費",amount:""};
+  qKind=q.kind;
+  sheet.innerHTML=`<h3>${id?"項目を編集":"項目を追加"}</h3>
+    <div class="field"><label>名前</label><input id="q-label" value="${esc(q.label)}" placeholder="例：コンビニ"></div>
+    <div class="field"><label>種別</label><div class="seg" id="q-seg"><button data-k="expense">支出</button><button data-k="income">収入</button></div></div>
+    <div class="field"><label>カテゴリ</label><select id="q-cat"></select></div>
+    <div class="field"><label>金額（円）</label><input id="q-amt" type="number" inputmode="numeric" value="${q.amount}" placeholder="0"></div>
+    <div class="btns"><button class="btn primary" onclick="saveQuickItem('${id||""}')">保存</button></div>
+    ${id?`<button class="del" onclick="delQuickItem('${id}')">この項目を削除</button>`:""}`;
+  document.querySelectorAll("#q-seg button").forEach(b=>b.onclick=()=>{qKind=b.dataset.k; qSeg(); fillQCats(document.getElementById("q-cat").value);});
+  qSeg(); fillQCats(q.category);
+  ov.classList.add("show");
+  setTimeout(()=>document.getElementById("q-label").focus(),100);
+}
+function qSeg(){document.querySelectorAll("#q-seg button").forEach(b=>b.classList.toggle("on",b.dataset.k===qKind));}
+function fillQCats(sel){const cats=qKind==="income"?INC_CATS:EXP_CATS; document.getElementById("q-cat").innerHTML=cats.map(c=>`<option ${c===sel?"selected":""}>${c}</option>`).join("");}
+function saveQuickItem(id){
+  const label=document.getElementById("q-label").value.trim();
+  const amount=+document.getElementById("q-amt").value||0;
+  if(!label){alert("名前を入力してください。");return;}
+  if(amount<=0){alert("金額を入力してください。");return;}
+  const obj={label,kind:qKind,category:document.getElementById("q-cat").value,amount};
+  if(id){Object.assign(db.quickItems.find(x=>x.id===id),obj);}else{db.quickItems.push({id:uid(),...obj});}
+  closeSheet(); save();
+}
+function delQuickItem(id){if(!confirm("この項目を削除しますか？"))return; db.quickItems=db.quickItems.filter(x=>x.id!==id); closeSheet(); save();}
+
+/* ---------- charges (電子マネーチャージ) ---------- */
+function renderCharges(){
+  const el=document.getElementById("a-charge");
+  if(!db.charges.length){el.innerHTML='<p class="empty" style="padding:6px 4px; text-align:left;">「編集」から、Suicaなどへのチャージを登録できます。</p>'; return;}
+  el.innerHTML=db.charges.map(c=>`
+    <button class="qbtn charge" onclick="doCharge('${c.id}')">
+      <span class="ql">${esc(c.label)}</span><span class="qa">${yen(c.amount)}</span></button>`).join("");
+}
+function doCharge(id){
+  const c=db.charges.find(x=>x.id===id); if(!c) return;
+  const from=db.accounts.find(a=>a.id===c.fromId), to=db.accounts.find(a=>a.id===c.toId);
+  if(!from||!to){alert("引落口座またはチャージ先の口座が見つかりません。「編集」で設定し直してください。");return;}
+  from.balance=(+from.balance||0)-c.amount;
+  to.balance=(+to.balance||0)+c.amount;
+  save(); toast(to.name+" に "+yen(c.amount)+" チャージ");
+}
+function openChargeManager(){
+  sheet.innerHTML=`<h3>電子マネーチャージ</h3>
+    <div class="card" style="margin-bottom:12px;">${
+      db.charges.length? db.charges.map(c=>{const to=db.accounts.find(a=>a.id===c.toId);
+        return `<div class="row" onclick="openCharge('${c.id}')">
+        <div class="main"><span class="name">${esc(c.label)}</span><span class="sub">${to?esc(to.name):"未設定"} へ</span></div>
+        <span class="amt">${yen(c.amount)}</span></div>`;}).join("")
+        : '<p class="empty">まだありません。</p>'}</div>
+    <div class="btns"><button class="btn primary" onclick="openCharge()">＋ 新規追加</button></div>`;
+  ov.classList.add("show");
+}
+function openCharge(id){
+  if(db.accounts.length<2){closeSheet(); alert("チャージには「引落口座」と「チャージ先（電子マネー）」の2つの口座が必要です。先に資産タブで口座を追加してください。");return;}
+  const emoney=db.accounts.find(a=>a.type==="emoney")||db.accounts[db.accounts.length-1];
+  const c=id?db.charges.find(x=>x.id===id):{label:"",fromId:db.accounts[0].id,toId:emoney.id,amount:""};
+  const opts=sel=>db.accounts.map(a=>`<option value="${a.id}" ${a.id===sel?"selected":""}>${esc(a.name)}</option>`).join("");
+  sheet.innerHTML=`<h3>${id?"チャージを編集":"チャージを追加"}</h3>
+    <div class="field"><label>名前</label><input id="c-label" value="${esc(c.label)}" placeholder="例：Suicaチャージ"></div>
+    <div class="field"><label>引落口座（減る）</label><select id="c-from">${opts(c.fromId)}</select></div>
+    <div class="field"><label>チャージ先（増える）</label><select id="c-to">${opts(c.toId)}</select></div>
+    <div class="field"><label>金額（円）</label><input id="c-amt" type="number" inputmode="numeric" value="${c.amount}" placeholder="5000"></div>
+    <div class="btns"><button class="btn primary" onclick="saveCharge('${id||""}')">保存</button></div>
+    ${id?`<button class="del" onclick="delCharge('${id}')">このチャージを削除</button>`:""}`;
+  ov.classList.add("show");
+}
+function saveCharge(id){
+  const label=document.getElementById("c-label").value.trim();
+  const fromId=document.getElementById("c-from").value, toId=document.getElementById("c-to").value;
+  const amount=+document.getElementById("c-amt").value||0;
+  if(!label){alert("名前を入力してください。");return;}
+  if(amount<=0){alert("金額を入力してください。");return;}
+  if(fromId===toId){alert("引落口座とチャージ先は別の口座にしてください。");return;}
+  const obj={label,fromId,toId,amount};
+  if(id){Object.assign(db.charges.find(x=>x.id===id),obj);}else{db.charges.push({id:uid(),...obj});}
+  closeSheet(); save();
+}
+function delCharge(id){if(!confirm("このチャージを削除しますか？"))return; db.charges=db.charges.filter(x=>x.id!==id); closeSheet(); save();}
+
 /* ---------- settings / backup ---------- */
 function renderSettings(){
   document.getElementById("s-stats").innerHTML=
@@ -539,7 +673,11 @@ function importData(e){
       const d=JSON.parse(r.result);
       if(!d||!Array.isArray(d.accounts)||!Array.isArray(d.transactions)) throw 0;
       if(!confirm("現在のデータを、読み込むファイルの内容で置き換えます。よろしいですか？")) return;
-      db={accounts:d.accounts, snapshots:Array.isArray(d.snapshots)?d.snapshots:[], transactions:d.transactions};
+      db={accounts:d.accounts, transactions:d.transactions,
+        snapshots:Array.isArray(d.snapshots)?d.snapshots:[],
+        budgets:Array.isArray(d.budgets)?d.budgets:[],
+        quickItems:Array.isArray(d.quickItems)?d.quickItems:[],
+        charges:Array.isArray(d.charges)?d.charges:[]};
       save(); alert("読み込みました。");
     }catch(err){alert("ファイルを読み込めませんでした。書き出したJSONファイルを選んでください。");}
   };
@@ -547,13 +685,13 @@ function importData(e){
 }
 function resetData(){
   if(!confirm("すべての口座・収支・記録を削除します。元に戻せません。よろしいですか？")) return;
-  db={accounts:[], snapshots:[], transactions:[]};
+  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[]};
   save(); alert("削除しました。");
 }
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function renderAll(){renderDash(); renderAssets(); renderBudget(); renderGoals(); renderSettings();}
+function renderAll(){renderDash(); renderAssets(); renderCharges(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
 renderAll();
 </script>
 </body>
