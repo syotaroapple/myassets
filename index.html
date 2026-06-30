@@ -81,6 +81,17 @@
   /* floating action button */
   #fab{position:fixed; right:16px; bottom:calc(74px + var(--safe-bot)); z-index:15; width:56px; height:56px; border-radius:50%; border:none; background:var(--blue); color:#fff; font-size:30px; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.28); display:none; align-items:center; justify-content:center; padding:0;}
   #fab:active{opacity:.8; transform:scale(.96);}
+  /* calendar */
+  .cal{display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:var(--line); border-radius:14px; overflow:hidden;}
+  .cal .dow{background:var(--surface); text-align:center; font-size:11px; padding:6px 0; color:var(--muted);}
+  .cal .dow.sun{color:var(--red);} .cal .dow.sat{color:var(--blue);}
+  .cal .cell{background:var(--surface); min-height:58px; padding:4px 4px 5px; display:flex; flex-direction:column;}
+  .cal .cell.empty{background:var(--bg);}
+  .cal .cell .dnum{font-size:11px; color:var(--text); align-self:flex-start;}
+  .cal .cell.sun .dnum{color:var(--red);} .cal .cell.sat .dnum{color:var(--blue);}
+  .cal .cell.today .dnum{background:var(--blue); color:#fff; border-radius:9px; padding:0 5px;}
+  .cal .amt-e{font-size:9px; color:var(--red); text-align:right; line-height:1.3;}
+  .cal .amt-i{font-size:9px; color:var(--green); text-align:right; line-height:1.3;}
   /* buttons */
   .btns{display:flex; gap:10px; margin:12px 0 4px;}
   button{font:inherit; cursor:pointer;}
@@ -171,8 +182,18 @@
     <div class="qhead"><span class="t">よく使う項目</span><button class="e" onclick="openQuickManager()">編集</button></div>
     <div class="qwrap" id="b-quick"></div>
 
-    <h2>明細</h2>
-    <div class="card" id="b-list"></div>
+    <div class="seg" id="b-viewseg" style="margin:18px 4px 2px;">
+      <button data-v="list" class="on">リスト</button>
+      <button data-v="cal">カレンダー</button>
+    </div>
+    <div id="b-listview">
+      <h2>明細</h2>
+      <div class="card" id="b-list"></div>
+    </div>
+    <div id="b-calview" style="display:none;">
+      <h2>カレンダー</h2>
+      <div class="cal" id="b-cal"></div>
+    </div>
   </section>
 
   <!-- GOAL (予算) -->
@@ -376,6 +397,52 @@ function renderBudget(){
       <span class="sub">${t.date.slice(5).replace('-','/')}</span></div>
       <span class="amt ${t.kind==='income'?'pos':'neg'}">${t.kind==='income'?'+':'−'}${yen(t.amount)}</span>
     </div>`).join("") : '<p class="empty">この月の記録はまだありません。</p>';
+  renderCalendar();
+}
+let bView="list";
+function setBView(v){
+  bView=v;
+  document.getElementById("b-listview").style.display=v==="list"?"block":"none";
+  document.getElementById("b-calview").style.display=v==="cal"?"block":"none";
+  document.querySelectorAll("#b-viewseg button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+}
+function renderCalendar(){
+  const el=document.getElementById("b-cal"); if(!el) return;
+  const [y,m]=curMonth.split("-").map(Number);
+  const first=new Date(y,m-1,1).getDay();
+  const days=new Date(y,m,0).getDate();
+  const t=today();
+  const sums={};
+  db.transactions.filter(x=>x.date.slice(0,7)===curMonth).forEach(x=>{
+    (sums[x.date]=sums[x.date]||{i:0,e:0})[x.kind==="income"?"i":"e"]+=x.amount;
+  });
+  const dow=["日","月","火","水","木","金","土"];
+  let html=dow.map((d,i)=>`<div class="dow ${i===0?"sun":i===6?"sat":""}">${d}</div>`).join("");
+  for(let k=0;k<first;k++) html+='<div class="cell empty"></div>';
+  for(let d=1;d<=days;d++){
+    const ds=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    const wd=(first+d-1)%7, s=sums[ds];
+    const cls=[wd===0?"sun":wd===6?"sat":"", ds===t?"today":""].filter(Boolean).join(" ");
+    html+=`<div class="cell ${cls}" onclick="openDay('${ds}')">
+      <span class="dnum">${d}</span>
+      <div style="margin-top:auto">
+        ${s&&s.e?`<div class="amt-e">-${s.e.toLocaleString("ja-JP")}</div>`:""}
+        ${s&&s.i?`<div class="amt-i">+${s.i.toLocaleString("ja-JP")}</div>`:""}
+      </div></div>`;
+  }
+  el.innerHTML=html;
+}
+function openDay(ds){
+  const list=db.transactions.filter(t=>t.date===ds).sort((a,b)=>b.amount-a.amount);
+  const md=ds.slice(5).replace("-","/");
+  sheet.innerHTML=`<h3>${md} の記録</h3>
+    <div class="card" style="margin-bottom:12px;">${
+      list.length? list.map(t=>`<div class="row" onclick="openTxn('${t.id}')">
+        <div class="main"><span class="name">${esc(t.category)}${t.memo?" ・ "+esc(t.memo):""}</span></div>
+        <span class="amt ${t.kind==="income"?"pos":"neg"}">${t.kind==="income"?"+":"−"}${yen(t.amount)}</span></div>`).join("")
+        : '<p class="empty">この日の記録はありません。</p>'}</div>
+    <div class="btns"><button class="btn primary" onclick="openTxn('','${ds}')">＋ この日に記録</button></div>`;
+  ov.classList.add("show");
 }
 
 /* ---------- modals ---------- */
@@ -413,8 +480,8 @@ function delAccount(id){
 }
 
 let txnKind="expense";
-function openTxn(id){
-  const t=id?db.transactions.find(x=>x.id===id):{date:today(),amount:"",kind:"expense",category:"食費",memo:""};
+function openTxn(id,defDate){
+  const t=id?db.transactions.find(x=>x.id===id):{date:defDate||today(),amount:"",kind:"expense",category:"食費",memo:""};
   txnKind=t.kind;
   sheet.innerHTML=`
     <h3>${id?"収支を編集":"収支を記録"}</h3>
@@ -717,6 +784,7 @@ function applyTheme(t){
 }
 document.querySelectorAll("#theme-seg button").forEach(b=>b.onclick=()=>applyTheme(b.dataset.t));
 applyTheme(localStorage.getItem("theme")||"auto");
+document.querySelectorAll("#b-viewseg button").forEach(b=>b.onclick=()=>setBView(b.dataset.v));
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
