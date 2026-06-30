@@ -78,6 +78,9 @@
   /* toast */
   #toast{position:fixed; left:50%; bottom:calc(80px + var(--safe-bot)); transform:translateX(-50%) translateY(20px); z-index:30; background:var(--text); color:var(--bg); font-size:14px; font-weight:500; padding:11px 18px; border-radius:99px; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; max-width:90%; text-align:center;}
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  /* floating action button */
+  #fab{position:fixed; right:16px; bottom:calc(74px + var(--safe-bot)); z-index:15; width:56px; height:56px; border-radius:50%; border:none; background:var(--blue); color:#fff; font-size:30px; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.28); display:none; align-items:center; justify-content:center; padding:0;}
+  #fab:active{opacity:.8; transform:scale(.96);}
   /* buttons */
   .btns{display:flex; gap:10px; margin:12px 0 4px;}
   button{font:inherit; cursor:pointer;}
@@ -170,7 +173,6 @@
 
     <h2>明細</h2>
     <div class="card" id="b-list"></div>
-    <div class="btns"><button class="btn primary" onclick="openTxn()">＋ 収支を記録</button></div>
   </section>
 
   <!-- GOAL (予算) -->
@@ -218,6 +220,7 @@
   <button id="t-settings" onclick="show('settings')"><span class="ic">⚙</span>設定</button>
 </nav>
 
+<button id="fab" onclick="openTxn()" aria-label="収支を記録">＋</button>
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 <div id="toast"></div>
 
@@ -250,6 +253,7 @@ function show(v){
     document.getElementById("t-"+k).classList.toggle("on",k===v);
   });
   document.getElementById("title").textContent=TITLES[v];
+  document.getElementById("fab").style.display = v==="budget" ? "flex" : "none";
   window.scrollTo(0,0);
 }
 
