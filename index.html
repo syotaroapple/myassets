@@ -191,7 +191,11 @@
       <div class="card" id="b-list"></div>
     </div>
     <div id="b-calview" style="display:none;">
-      <h2>カレンダー</h2>
+      <div class="month-nav" style="margin:14px 0 6px;">
+        <button onclick="shiftMonth(-1)">‹</button>
+        <span class="m" id="b-month2"></span>
+        <button onclick="shiftMonth(1)">›</button>
+      </div>
       <div class="cal" id="b-cal"></div>
       <p class="empty" id="b-calnote" style="padding:10px 4px 0; text-align:left; font-size:12px;"></p>
     </div>
@@ -420,6 +424,7 @@ function setBView(v){
 function renderCalendar(){
   const el=document.getElementById("b-cal"); if(!el) return;
   const [y,m]=curMonth.split("-").map(Number);
+  const mlabel=document.getElementById("b-month2"); if(mlabel) mlabel.textContent=`${y}年${m}月`;
   const first=new Date(y,m-1,1).getDay();
   const days=new Date(y,m,0).getDate();
   const t=today();
