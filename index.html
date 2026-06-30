@@ -220,13 +220,11 @@
       </div>
     </div>
 
-    <h2>カレンダーの1日予算</h2>
+    <h2>カレンダーの予算</h2>
     <div class="card pad">
-      <div class="field" style="margin:0;">
-        <label>1日あたりの予算（円）。0で無効</label>
-        <input id="daily-budget" type="number" inputmode="numeric" onchange="saveDailyBudget()">
-      </div>
-      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">家計簿のカレンダーで、各日の支出がこの金額より少なければ差額をプラス表示します。</p>
+      <div id="calbudget-info" style="font-size:14px;"></div>
+      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">「予算」タブで予算を作成・変更すると、その期間と1日あたりの金額がカレンダーに反映されます（予算を削除しても残ります）。</p>
+      <div class="btns" style="margin-top:10px;"><button class="btn" onclick="clearCalBudget()">カレンダーの予算をクリア</button></div>
     </div>
 
     <h2>データのバックアップ</h2>
@@ -275,9 +273,11 @@ function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
     if(d&&d.accounts){
       ["snapshots","transactions","budgets","quickItems","charges"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
-      if(typeof d.dailyBudget!=="number")d.dailyBudget=3000;
+      if(!d.calBudget||typeof d.calBudget!=="object")
+        d.calBudget={daily:typeof d.dailyBudget==="number"?d.dailyBudget:3000, start:null, end:null};
+      delete d.dailyBudget;
       return d;}}catch(e){}
-  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], dailyBudget:3000};
+  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudget:{daily:3000,start:null,end:null}};
 }
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
@@ -432,19 +432,21 @@ function renderCalendar(){
   db.transactions.filter(x=>x.date.slice(0,7)===curMonth).forEach(x=>{
     (sums[x.date]=sums[x.date]||{i:0,e:0})[x.kind==="income"?"i":"e"]+=x.amount;
   });
-  const budget=db.dailyBudget>0?db.dailyBudget:0;
+  const cb=db.calBudget||{daily:0,start:null,end:null};
+  const budgetOn=cb.daily>0;
   const dow=["日","月","火","水","木","金","土"];
   let html=dow.map((d,i)=>`<div class="dow ${i===0?"sun":i===6?"sat":""}">${d}</div>`).join("");
   for(let k=0;k<first;k++) html+='<div class="cell empty"></div>';
-  let saved=0;
+  let saved=0, cnt=0;
   for(let d=1;d<=days;d++){
     const ds=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     const wd=(first+d-1)%7, s=sums[ds];
     const cls=[wd===0?"sun":wd===6?"sat":"", ds===t?"today":""].filter(Boolean).join(" ");
+    const inPeriod = !cb.start || (ds>=cb.start && ds<=cb.end);
     let amts;
-    if(budget && ds<=t){
-      const diff=budget-(s?s.e:0);
-      saved+=diff;
+    if(budgetOn && inPeriod && ds<=t){
+      const diff=cb.daily-(s?s.e:0);
+      saved+=diff; cnt++;
       amts = diff>=0 ? `<div class="amt-i">+${diff.toLocaleString("ja-JP")}</div>`
                      : `<div class="amt-e">-${(-diff).toLocaleString("ja-JP")}</div>`;
     }else{
@@ -454,9 +456,16 @@ function renderCalendar(){
   }
   el.innerHTML=html;
   const note=document.getElementById("b-calnote");
-  if(note) note.innerHTML = budget
-    ? `1日 ¥${budget.toLocaleString("ja-JP")} の予算 ・ 今月ここまで <b style="color:var(--${saved>=0?"green":"red"})">${saved>=0?"+":"−"}¥${Math.abs(saved).toLocaleString("ja-JP")}</b>（緑=節約／赤=超過）`
-    : "各日の支出（赤）と収入（緑）を表示中。設定で「1日の予算」を決めると予算との差で表示できます。";
+  if(note){
+    if(!budgetOn){
+      note.textContent="各日の支出（赤）と収入（緑）を表示中。「予算」タブで予算を作るとカレンダーに反映されます。";
+    }else if(cnt>0){
+      const ptxt = cb.start ? `${cb.start.replace(/-/g,"/")}〜${cb.end.replace(/-/g,"/")} ・ ` : "全期間 ・ ";
+      note.innerHTML=`予算 ${ptxt}1日¥${cb.daily.toLocaleString("ja-JP")} ・ 今月ここまで <b style="color:var(--${saved>=0?"green":"red"})">${saved>=0?"+":"−"}¥${Math.abs(saved).toLocaleString("ja-JP")}</b>（緑=節約／赤=超過）`;
+    }else{
+      note.textContent=`この月は予算期間外です（予算 ${cb.start.replace(/-/g,"/")}〜${cb.end.replace(/-/g,"/")} ・ 1日¥${cb.daily.toLocaleString("ja-JP")}）。`;
+    }
+  }
 }
 function openDay(ds){
   const list=db.transactions.filter(t=>t.date===ds).sort((a,b)=>b.amount-a.amount);
@@ -641,6 +650,8 @@ function saveGoal(id){
   const obj={name,amount,start,end,category:document.getElementById("g-cat").value};
   if(id){const b=db.budgets.find(x=>x.id===id); Object.assign(b,obj);}
   else{db.budgets.push({id:uid(),...obj});}
+  const totalDays=daysInc(start,end)||1;
+  db.calBudget={daily:Math.round(amount/totalDays), start, end};
   closeSheet(); save();
 }
 function delGoal(id){
@@ -765,11 +776,16 @@ function delCharge(id){if(!confirm("このチャージを削除しますか？")
 function renderSettings(){
   document.getElementById("s-stats").innerHTML=
     `口座：${db.accounts.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
-  const di=document.getElementById("daily-budget"); if(di) di.value=db.dailyBudget;
+  const ci=document.getElementById("calbudget-info");
+  if(ci){const cb=db.calBudget;
+    ci.innerHTML=(cb&&cb.daily>0)
+      ? `1日 ¥${cb.daily.toLocaleString("ja-JP")}${cb.start?`<br>期間：${cb.start.replace(/-/g,"/")} 〜 ${cb.end.replace(/-/g,"/")}`:"<br>期間：全期間"}`
+      : "未設定（オフ）";
+  }
 }
-function saveDailyBudget(){
-  db.dailyBudget=Math.max(0,+document.getElementById("daily-budget").value||0);
-  save();
+function clearCalBudget(){
+  if(!confirm("カレンダーの予算をクリアして、各日の支出表示に戻しますか？")) return;
+  db.calBudget={daily:0,start:null,end:null}; save();
 }
 function exportData(){
   const blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"});
@@ -792,7 +808,7 @@ function importData(e){
         budgets:Array.isArray(d.budgets)?d.budgets:[],
         quickItems:Array.isArray(d.quickItems)?d.quickItems:[],
         charges:Array.isArray(d.charges)?d.charges:[],
-        dailyBudget:typeof d.dailyBudget==="number"?d.dailyBudget:3000};
+        calBudget:(d.calBudget&&typeof d.calBudget==="object")?d.calBudget:{daily:typeof d.dailyBudget==="number"?d.dailyBudget:3000,start:null,end:null}};
       save(); alert("読み込みました。");
     }catch(err){alert("ファイルを読み込めませんでした。書き出したJSONファイルを選んでください。");}
   };
@@ -800,7 +816,7 @@ function importData(e){
 }
 function resetData(){
   if(!confirm("すべての口座・収支・記録を削除します。元に戻せません。よろしいですか？")) return;
-  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], dailyBudget:3000};
+  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudget:{daily:3000,start:null,end:null}};
   save(); alert("削除しました。");
 }
 
