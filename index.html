@@ -193,6 +193,7 @@
     <div id="b-calview" style="display:none;">
       <h2>カレンダー</h2>
       <div class="cal" id="b-cal"></div>
+      <p class="empty" id="b-calnote" style="padding:10px 4px 0; text-align:left; font-size:12px;"></p>
     </div>
   </section>
 
@@ -213,6 +214,15 @@
         <button data-t="light">ライト</button>
         <button data-t="dark">ダーク</button>
       </div>
+    </div>
+
+    <h2>カレンダーの1日予算</h2>
+    <div class="card pad">
+      <div class="field" style="margin:0;">
+        <label>1日あたりの予算（円）。0で無効</label>
+        <input id="daily-budget" type="number" inputmode="numeric" onchange="saveDailyBudget()">
+      </div>
+      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">家計簿のカレンダーで、各日の支出がこの金額より少なければ差額をプラス表示します。</p>
     </div>
 
     <h2>データのバックアップ</h2>
@@ -261,8 +271,9 @@ function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
     if(d&&d.accounts){
       ["snapshots","transactions","budgets","quickItems","charges"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
+      if(typeof d.dailyBudget!=="number")d.dailyBudget=3000;
       return d;}}catch(e){}
-  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[]};
+  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], dailyBudget:3000};
 }
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
@@ -416,21 +427,31 @@ function renderCalendar(){
   db.transactions.filter(x=>x.date.slice(0,7)===curMonth).forEach(x=>{
     (sums[x.date]=sums[x.date]||{i:0,e:0})[x.kind==="income"?"i":"e"]+=x.amount;
   });
+  const budget=db.dailyBudget>0?db.dailyBudget:0;
   const dow=["日","月","火","水","木","金","土"];
   let html=dow.map((d,i)=>`<div class="dow ${i===0?"sun":i===6?"sat":""}">${d}</div>`).join("");
   for(let k=0;k<first;k++) html+='<div class="cell empty"></div>';
+  let saved=0;
   for(let d=1;d<=days;d++){
     const ds=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     const wd=(first+d-1)%7, s=sums[ds];
     const cls=[wd===0?"sun":wd===6?"sat":"", ds===t?"today":""].filter(Boolean).join(" ");
-    html+=`<div class="cell ${cls}" onclick="openDay('${ds}')">
-      <span class="dnum">${d}</span>
-      <div style="margin-top:auto">
-        ${s&&s.e?`<div class="amt-e">-${s.e.toLocaleString("ja-JP")}</div>`:""}
-        ${s&&s.i?`<div class="amt-i">+${s.i.toLocaleString("ja-JP")}</div>`:""}
-      </div></div>`;
+    let amts;
+    if(budget && ds<=t){
+      const diff=budget-(s?s.e:0);
+      saved+=diff;
+      amts = diff>=0 ? `<div class="amt-i">+${diff.toLocaleString("ja-JP")}</div>`
+                     : `<div class="amt-e">-${(-diff).toLocaleString("ja-JP")}</div>`;
+    }else{
+      amts = `${s&&s.e?`<div class="amt-e">-${s.e.toLocaleString("ja-JP")}</div>`:""}${s&&s.i?`<div class="amt-i">+${s.i.toLocaleString("ja-JP")}</div>`:""}`;
+    }
+    html+=`<div class="cell ${cls}" onclick="openDay('${ds}')"><span class="dnum">${d}</span><div style="margin-top:auto">${amts}</div></div>`;
   }
   el.innerHTML=html;
+  const note=document.getElementById("b-calnote");
+  if(note) note.innerHTML = budget
+    ? `1日 ¥${budget.toLocaleString("ja-JP")} の予算 ・ 今月ここまで <b style="color:var(--${saved>=0?"green":"red"})">${saved>=0?"+":"−"}¥${Math.abs(saved).toLocaleString("ja-JP")}</b>（緑=節約／赤=超過）`
+    : "各日の支出（赤）と収入（緑）を表示中。設定で「1日の予算」を決めると予算との差で表示できます。";
 }
 function openDay(ds){
   const list=db.transactions.filter(t=>t.date===ds).sort((a,b)=>b.amount-a.amount);
@@ -739,6 +760,11 @@ function delCharge(id){if(!confirm("このチャージを削除しますか？")
 function renderSettings(){
   document.getElementById("s-stats").innerHTML=
     `口座：${db.accounts.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
+  const di=document.getElementById("daily-budget"); if(di) di.value=db.dailyBudget;
+}
+function saveDailyBudget(){
+  db.dailyBudget=Math.max(0,+document.getElementById("daily-budget").value||0);
+  save();
 }
 function exportData(){
   const blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"});
@@ -760,7 +786,8 @@ function importData(e){
         snapshots:Array.isArray(d.snapshots)?d.snapshots:[],
         budgets:Array.isArray(d.budgets)?d.budgets:[],
         quickItems:Array.isArray(d.quickItems)?d.quickItems:[],
-        charges:Array.isArray(d.charges)?d.charges:[]};
+        charges:Array.isArray(d.charges)?d.charges:[],
+        dailyBudget:typeof d.dailyBudget==="number"?d.dailyBudget:3000};
       save(); alert("読み込みました。");
     }catch(err){alert("ファイルを読み込めませんでした。書き出したJSONファイルを選んでください。");}
   };
@@ -768,7 +795,7 @@ function importData(e){
 }
 function resetData(){
   if(!confirm("すべての口座・収支・記録を削除します。元に戻せません。よろしいですか？")) return;
-  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[]};
+  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], dailyBudget:3000};
   save(); alert("削除しました。");
 }
 
