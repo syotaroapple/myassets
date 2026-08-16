@@ -75,6 +75,9 @@
   .qbtn .qa{font-size:15px; font-weight:600;}
   .qbtn.exp .qa{color:var(--red);} .qbtn.inc .qa{color:var(--green);} .qbtn.charge .qa{color:var(--c-emoney);}
   .qbtn:active{opacity:.55;}
+  .badge-due{font-size:10px; padding:2px 7px; border-radius:99px; background:var(--c-cash); color:#fff; margin-left:6px; vertical-align:1px;}
+  .spend-card{background:var(--surface); border-radius:14px; padding:16px;}
+  .spend-card .amt-big{font-size:32px; font-weight:600; margin:6px 0 2px;}
   /* toast */
   #toast{position:fixed; left:50%; bottom:calc(80px + var(--safe-bot)); transform:translateX(-50%) translateY(20px); z-index:30; background:var(--text); color:var(--bg); font-size:14px; font-weight:500; padding:11px 18px; border-radius:99px; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; max-width:90%; text-align:center;}
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
@@ -133,6 +136,13 @@
 <div class="wrap">
   <!-- DASHBOARD -->
   <section id="v-dash" class="view active">
+    <h2>使える金額</h2>
+    <div class="spend-card">
+      <span style="font-size:13px; color:var(--muted);" id="d-spend-until"></span>
+      <p class="amt-big" id="d-spend-perday">¥0<span style="font-size:14px; font-weight:400; color:var(--muted);"> /日</span></p>
+      <p style="font-size:12px; color:var(--muted); margin:0;" id="d-spend-detail"></p>
+    </div>
+
     <h2>総資産</h2>
     <div class="tiles">
       <div class="tile hero" style="grid-column:1/3;">
@@ -143,6 +153,9 @@
       <div class="tile"><p class="lbl">今月の支出</p><p class="val" id="d-exp">¥0</p></div>
       <div class="tile" style="grid-column:1/3;"><p class="lbl">今月の収支</p><p class="val" id="d-bal">¥0</p></div>
     </div>
+
+    <div class="qhead"><span class="t">今後の予定</span><button class="e" onclick="openPlanManager()">編集</button></div>
+    <div class="card" id="d-plan"></div>
 
     <h2>資産推移</h2>
     <div class="card pad"><div id="d-trend"></div></div>
@@ -221,6 +234,15 @@
       </div>
     </div>
 
+    <h2>給与日</h2>
+    <div class="card pad">
+      <div class="field" style="margin:0;">
+        <label>毎月の給与日（1〜28日）。土日祝は自動で前の営業日にずらします</label>
+        <input id="payday-input" type="number" min="1" max="28" onchange="savePayday()">
+      </div>
+      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">ホームの「使える金額」は、この給与日までの日数で計算します。</p>
+    </div>
+
     <h2>カレンダーの予算</h2>
     <div class="card pad">
       <div id="calbudget-info" style="font-size:14px;"></div>
@@ -273,7 +295,9 @@ let curMonth=today().slice(0,7);
 function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
     if(d&&d.accounts){
-      ["snapshots","transactions","budgets","quickItems","charges"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
+      ["snapshots","transactions","budgets","quickItems","charges","scheduled","recurring"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
+      d.recurring.forEach(r=>{if(!Array.isArray(r.confirmed))r.confirmed=[];});
+      if(typeof d.payday!=="number") d.payday=25;
       if(!Array.isArray(d.calBudgets)){
         d.calBudgets=[];
         const legacy = (d.calBudget&&typeof d.calBudget==="object") ? d.calBudget
@@ -282,7 +306,7 @@ function load(){
       }
       delete d.dailyBudget; delete d.calBudget;
       return d;}}catch(e){}
-  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[]};
+  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25};
 }
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
@@ -336,6 +360,9 @@ function renderDash(){
   const ents=Object.entries(cm).sort((a,b)=>b[1]-a[1]);
   cats.innerHTML = ents.length ? ents.map(([c,v])=>`<span class="chip">${c} ${yen(v)}</span>`).join("")
     : '<p class="empty" style="padding:12px;">今月の支出はまだありません。</p>';
+
+  renderSpendable();
+  renderPlan();
 }
 
 function trendSeries(){
@@ -682,6 +709,243 @@ function delGoal(id){
   closeSheet(); save();
 }
 
+/* ---------- JP holidays & payday ---------- */
+function springEquinoxDay(y){return Math.floor(20.8431+0.242194*(y-1980)-Math.floor((y-1980)/4));}
+function autumnEquinoxDay(y){return Math.floor(23.2488+0.242194*(y-1980)-Math.floor((y-1980)/4));}
+function nthMonday(y,m,n){
+  let count=0;
+  const dim=new Date(y,m,0).getDate();
+  for(let day=1;day<=dim;day++){
+    if(new Date(y,m-1,day).getDay()===1){count++; if(count===n) return day;}
+  }
+  return null;
+}
+function jpHolidaySet(y){
+  const H=new Set();
+  const add=(m,d)=>{if(d) H.add(`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`);};
+  add(1,1); add(1,nthMonday(y,1,2)); add(2,11); add(2,23);
+  add(3,springEquinoxDay(y)); add(4,29); add(5,3); add(5,4); add(5,5);
+  add(7,nthMonday(y,7,3)); add(8,11); add(9,nthMonday(y,9,3)); add(9,autumnEquinoxDay(y));
+  add(10,nthMonday(y,10,2)); add(11,3); add(11,23);
+  [...H].forEach(ds=>{
+    const dt=pDate(ds);
+    if(dt.getDay()===0){
+      let sub=new Date(dt);
+      do{sub.setDate(sub.getDate()+1);}while(H.has(fmtDate(sub)));
+      H.add(fmtDate(sub));
+    }
+  });
+  return H;
+}
+const _holidayCache={};
+function isJpHoliday(ds){
+  const y=+ds.slice(0,4);
+  if(!_holidayCache[y]) _holidayCache[y]=jpHolidaySet(y);
+  return _holidayCache[y].has(ds);
+}
+function isBusinessDay(ds){
+  const wd=pDate(ds).getDay();
+  return wd!==0 && wd!==6 && !isJpHoliday(ds);
+}
+function prevBusinessDay(ds){
+  let d=pDate(ds);
+  while(!isBusinessDay(fmtDate(d))) d.setDate(d.getDate()-1);
+  return fmtDate(d);
+}
+function nextPayday(){
+  const day=db.payday||25, t=today();
+  let d=new Date(); d.setHours(0,0,0,0);
+  for(let i=0;i<3;i++){
+    const y=d.getFullYear(), m=d.getMonth()+1;
+    const dim=new Date(y,m,0).getDate();
+    const candStr=`${y}-${String(m).padStart(2,"0")}-${String(Math.min(day,dim)).padStart(2,"0")}`;
+    const adjusted=prevBusinessDay(candStr);
+    if(adjusted>=t) return adjusted;
+    d.setMonth(d.getMonth()+1);
+  }
+  return t;
+}
+function savePayday(){
+  db.payday=Math.min(28,Math.max(1,+document.getElementById("payday-input").value||25));
+  save();
+}
+
+/* ---------- scheduled / recurring plans ---------- */
+function liquidAssets(){
+  return db.accounts.filter(a=>a.type!=="stock").reduce((s,a)=>s+(+a.balance||0),0);
+}
+function nextOccurrence(r){
+  let d=new Date(); d.setDate(1); d.setHours(0,0,0,0);
+  for(let i=0;i<24;i++){
+    const y=d.getFullYear(), m=d.getMonth()+1;
+    const monthStr=`${y}-${String(m).padStart(2,"0")}`;
+    if(!(r.confirmed||[]).includes(monthStr)){
+      const dim=new Date(y,m,0).getDate();
+      const day=Math.min(r.day,dim);
+      return {monthStr, date:`${y}-${String(m).padStart(2,"0")}-${String(day).padStart(2,"0")}`};
+    }
+    d.setMonth(d.getMonth()+1);
+  }
+  return null;
+}
+function planItems(){
+  const sched=(db.scheduled||[]).map(s=>({...s,_kind2:"scheduled"}));
+  const rec=(db.recurring||[]).map(r=>{const n=nextOccurrence(r); return n?{...r,date:n.date,_monthStr:n.monthStr,_kind2:"recurring"}:null;}).filter(Boolean);
+  return [...sched,...rec].sort((a,b)=>a.date<b.date?-1:1);
+}
+function spendableInfo(){
+  const payday=nextPayday(), t=today();
+  const remDays=Math.max(1, daysInc(t,payday));
+  const liquid=liquidAssets();
+  const pending=planItems().filter(p=>p.kind==="expense" && p.date<=payday).reduce((s,p)=>s+p.amount,0);
+  const spendable=Math.max(0, liquid-pending);
+  return {payday,remDays,liquid,pending,spendable,perDay:spendable/remDays};
+}
+function renderSpendable(){
+  const el=document.getElementById("d-spend-until"); if(!el) return;
+  const info=spendableInfo();
+  const wd=["日","月","火","水","木","金","土"][pDate(info.payday).getDay()];
+  el.textContent=`給与日 ${info.payday.slice(5).replace("-","/")}(${wd}) まで あと${info.remDays}日`;
+  document.getElementById("d-spend-perday").innerHTML=`${yen(info.perDay)}<span style="font-size:14px; font-weight:400; color:var(--muted);"> /日</span>`;
+  document.getElementById("d-spend-detail").textContent = info.pending>0
+    ? `使えるお金 ${yen(info.liquid)} − 今後の支払い予定 ${yen(info.pending)} ＝ ${yen(info.spendable)}`
+    : `使えるお金 ${yen(info.liquid)}（証券口座を除く）`;
+}
+function renderPlan(){
+  const el=document.getElementById("d-plan"); if(!el) return;
+  const t=today();
+  const items=planItems();
+  const due=items.filter(p=>p.date<=t);
+  const future=items.filter(p=>p.date>t).slice(0,6);
+  if(!due.length && !future.length){
+    el.innerHTML='<p class="empty">「編集」から、家賃やサブスクなどの予定を登録できます。</p>';
+    return;
+  }
+  const row=(p,isDue)=>`<div class="row" onclick="openPlanConfirm('${p._kind2}','${p.id}')">
+    <div class="main"><span class="name">${esc(p.label)}${p._kind2==='recurring'?' <span class="sub">（毎月）</span>':''}${isDue?'<span class="badge-due">確認</span>':''}</span>
+    <span class="sub">${p.date.slice(5).replace('-','/')} ・ ${esc(p.category)}</span></div>
+    <span class="amt ${p.kind==='income'?'pos':'neg'}">${p.kind==='income'?'+':'−'}${yen(p.amount)}</span></div>`;
+  el.innerHTML = due.map(p=>row(p,true)).join("") + future.map(p=>row(p,false)).join("");
+}
+
+let planConfirmKind, planConfirmId, planConfirmMonth, planConfirmTxnKind;
+function openPlanConfirm(kind2,id){
+  let p;
+  if(kind2==="scheduled"){
+    const s=db.scheduled.find(x=>x.id===id); if(!s) return;
+    p={...s};
+  }else{
+    const r=db.recurring.find(x=>x.id===id); if(!r) return;
+    const n=nextOccurrence(r); if(!n) return;
+    p={...r, date:n.date, _monthStr:n.monthStr};
+  }
+  planConfirmKind=kind2; planConfirmId=id; planConfirmMonth=p._monthStr; planConfirmTxnKind=p.kind;
+  sheet.innerHTML=`<h3>予定を記録</h3>
+    <div class="field"><label>内容</label><input id="pc-label" value="${esc(p.label)}"></div>
+    <div class="field"><label>日付</label><input id="pc-date" type="date" value="${p.date}"></div>
+    <div class="field"><label>金額（円）</label><input id="pc-amt" type="number" inputmode="numeric" value="${p.amount}"></div>
+    <div class="field"><label>カテゴリ</label><select id="pc-cat">${(p.kind==="income"?INC_CATS:EXP_CATS).map(c=>`<option ${c===p.category?"selected":""}>${c}</option>`).join("")}</select></div>
+    <div class="btns"><button class="btn primary" onclick="savePlanConfirm()">記録する（実績にする）</button></div>
+    ${kind2==="recurring"?'<button class="del" style="color:var(--blue);" onclick="skipPlanOccurrence()">この回は記録しない（スキップ）</button>':""}
+    <button class="del" onclick="openPlanItem('${kind2}','${id}')">この予定を編集・削除</button>`;
+  ov.classList.add("show");
+}
+function savePlanConfirm(){
+  const label=document.getElementById("pc-label").value.trim()||"予定";
+  const date=document.getElementById("pc-date").value||today();
+  const amount=+document.getElementById("pc-amt").value||0;
+  const category=document.getElementById("pc-cat").value;
+  if(amount<=0){alert("金額を入力してください。");return;}
+  db.transactions.push({id:uid(),date,amount,kind:planConfirmTxnKind,category,memo:label});
+  if(planConfirmKind==="scheduled"){
+    db.scheduled=db.scheduled.filter(x=>x.id!==planConfirmId);
+  }else{
+    const r=db.recurring.find(x=>x.id===planConfirmId);
+    if(r){ r.confirmed=r.confirmed||[]; if(!r.confirmed.includes(planConfirmMonth)) r.confirmed.push(planConfirmMonth); }
+  }
+  curMonth=date.slice(0,7);
+  closeSheet(); save(); toast(label+" を記録しました");
+}
+function skipPlanOccurrence(){
+  const r=db.recurring.find(x=>x.id===planConfirmId);
+  if(r){ r.confirmed=r.confirmed||[]; if(!r.confirmed.includes(planConfirmMonth)) r.confirmed.push(planConfirmMonth); }
+  closeSheet(); save();
+}
+
+function openPlanManager(){
+  const items=[...(db.scheduled||[]).map(s=>({...s,_kind2:"scheduled"})), ...(db.recurring||[]).map(r=>({...r,_kind2:"recurring"}))];
+  sheet.innerHTML=`<h3>予定の管理</h3>
+    <div class="card" style="margin-bottom:12px;">${
+      items.length? items.map(p=>`<div class="row" onclick="openPlanItem('${p._kind2}','${p.id}')">
+        <div class="main"><span class="name">${esc(p.label)}</span>
+        <span class="sub">${p._kind2==="recurring"?`毎月${p.day}日`:p.date.replace(/-/g,"/")}</span></div>
+        <span class="amt ${p.kind==='income'?'pos':'neg'}">${p.kind==='income'?'+':'−'}${yen(p.amount)}</span></div>`).join("")
+        : '<p class="empty">まだありません。</p>'}</div>
+    <div class="btns"><button class="btn primary" onclick="openPlanItem()">＋ 新規追加</button></div>`;
+  ov.classList.add("show");
+}
+let planKind="expense", planFreq="once";
+function openPlanItem(kind2,id){
+  const p = !kind2 ? {label:"",kind:"expense",category:"食費",amount:"",date:today(),day:25}
+    : kind2==="scheduled" ? {...db.scheduled.find(x=>x.id===id)}
+    : {...db.recurring.find(x=>x.id===id)};
+  planKind=p.kind; planFreq = kind2==="recurring" ? "monthly" : "once";
+  const isEdit=!!kind2;
+  sheet.innerHTML=`<h3>${isEdit?"予定を編集":"予定を追加"}</h3>
+    <div class="field"><label>名前</label><input id="p-label" value="${esc(p.label)}" placeholder="例：家賃"></div>
+    <div class="field"><label>種別</label><div class="seg" id="p-seg"><button data-k="expense">支出</button><button data-k="income">収入</button></div></div>
+    <div class="field"><label>頻度</label><div class="seg" id="p-freq"><button data-f="once">単発</button><button data-f="monthly">毎月</button></div></div>
+    <div class="field" id="p-date-field"><label>日付</label><input id="p-date" type="date" value="${p.date||today()}"></div>
+    <div class="field" id="p-day-field" style="display:none;"><label>毎月の日にち（1〜28）</label><input id="p-day" type="number" min="1" max="28" value="${p.day||25}"></div>
+    <div class="field"><label>カテゴリ</label><select id="p-cat"></select></div>
+    <div class="field"><label>金額（円）</label><input id="p-amt" type="number" inputmode="numeric" value="${p.amount}" placeholder="0"></div>
+    <div class="btns"><button class="btn primary" onclick="savePlanItem('${kind2||""}','${id||""}')">保存</button></div>
+    ${isEdit?`<button class="del" onclick="delPlanItem('${kind2}','${id}')">この予定を削除</button>`:""}`;
+  document.querySelectorAll("#p-seg button").forEach(b=>b.onclick=()=>{planKind=b.dataset.k; pSeg(); fillPCats(document.getElementById("p-cat").value);});
+  document.querySelectorAll("#p-freq button").forEach(b=>b.onclick=()=>{planFreq=b.dataset.f; pFreq();});
+  pSeg(); pFreq(); fillPCats(p.category);
+  ov.classList.add("show");
+  setTimeout(()=>document.getElementById("p-label").focus(),100);
+}
+function pSeg(){document.querySelectorAll("#p-seg button").forEach(b=>b.classList.toggle("on",b.dataset.k===planKind));}
+function pFreq(){
+  document.querySelectorAll("#p-freq button").forEach(b=>b.classList.toggle("on",b.dataset.f===planFreq));
+  document.getElementById("p-date-field").style.display= planFreq==="once" ? "block":"none";
+  document.getElementById("p-day-field").style.display= planFreq==="monthly" ? "block":"none";
+}
+function fillPCats(sel){const cats=planKind==="income"?INC_CATS:EXP_CATS; document.getElementById("p-cat").innerHTML=cats.map(c=>`<option ${c===sel?"selected":""}>${c}</option>`).join("");}
+function savePlanItem(kind2,id){
+  const label=document.getElementById("p-label").value.trim();
+  const amount=+document.getElementById("p-amt").value||0;
+  const category=document.getElementById("p-cat").value;
+  if(!label){alert("名前を入力してください。");return;}
+  if(amount<=0){alert("金額を入力してください。");return;}
+  if(planFreq==="once"){
+    const date=document.getElementById("p-date").value||today();
+    const obj={label,kind:planKind,category,amount,date};
+    if(kind2==="scheduled"&&id){ Object.assign(db.scheduled.find(x=>x.id===id),obj); }
+    else{
+      if(kind2==="recurring"&&id){ db.recurring=db.recurring.filter(x=>x.id!==id); }
+      db.scheduled.push({id:uid(),...obj});
+    }
+  }else{
+    const day=Math.min(28,Math.max(1,+document.getElementById("p-day").value||25));
+    const obj={label,kind:planKind,category,amount,day};
+    if(kind2==="recurring"&&id){ Object.assign(db.recurring.find(x=>x.id===id),obj); }
+    else{
+      if(kind2==="scheduled"&&id){ db.scheduled=db.scheduled.filter(x=>x.id!==id); }
+      db.recurring.push({id:uid(),confirmed:[],...obj});
+    }
+  }
+  closeSheet(); save();
+}
+function delPlanItem(kind2,id){
+  if(!confirm("この予定を削除しますか？")) return;
+  if(kind2==="scheduled") db.scheduled=db.scheduled.filter(x=>x.id!==id);
+  else db.recurring=db.recurring.filter(x=>x.id!==id);
+  closeSheet(); save();
+}
+
 /* ---------- toast ---------- */
 function toast(msg){const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1700);}
 
@@ -798,6 +1062,7 @@ function delCharge(id){if(!confirm("このチャージを削除しますか？")
 function renderSettings(){
   document.getElementById("s-stats").innerHTML=
     `口座：${db.accounts.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
+  const pi=document.getElementById("payday-input"); if(pi) pi.value=db.payday;
   const ci=document.getElementById("calbudget-info");
   if(ci){const list=db.calBudgets||[];
     ci.innerHTML= list.length
@@ -831,7 +1096,10 @@ function importData(e){
         quickItems:Array.isArray(d.quickItems)?d.quickItems:[],
         charges:Array.isArray(d.charges)?d.charges:[],
         calBudgets:Array.isArray(d.calBudgets)?d.calBudgets
-          :(d.calBudget&&d.calBudget.daily>0)?[{id:uid(),daily:d.calBudget.daily,start:d.calBudget.start||null,end:d.calBudget.end||null}]:[]};
+          :(d.calBudget&&d.calBudget.daily>0)?[{id:uid(),daily:d.calBudget.daily,start:d.calBudget.start||null,end:d.calBudget.end||null}]:[],
+        scheduled:Array.isArray(d.scheduled)?d.scheduled:[],
+        recurring:Array.isArray(d.recurring)?d.recurring.map(r=>({confirmed:[],...r})):[],
+        payday:typeof d.payday==="number"?d.payday:25};
       save(); alert("読み込みました。");
     }catch(err){alert("ファイルを読み込めませんでした。書き出したJSONファイルを選んでください。");}
   };
@@ -839,7 +1107,7 @@ function importData(e){
 }
 function resetData(){
   if(!confirm("すべての口座・収支・記録を削除します。元に戻せません。よろしいですか？")) return;
-  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[]};
+  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25};
   save(); alert("削除しました。");
 }
 
