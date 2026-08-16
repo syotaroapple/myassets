@@ -251,7 +251,7 @@
     <h2>カレンダーの予算</h2>
     <div class="card pad">
       <div id="calbudget-info" style="font-size:14px;"></div>
-      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">「予算」タブで予算を作成・変更すると、その期間と1日あたりの金額がカレンダーに反映されます。期間ごとに保存され、予算を削除しても残ります。</p>
+      <p style="font-size:12px; color:var(--muted); margin:8px 0 0;">「予算」タブで予算を作成・変更すると、その期間と1日あたりの金額がカレンダーに反映されます。予算を削除すると、対応するカレンダーの表示も一緒に消えます。</p>
       <div class="btns" style="margin-top:10px;"><button class="btn" onclick="clearCalBudget()">カレンダーの予算をクリア</button></div>
     </div>
 
@@ -699,18 +699,20 @@ function saveGoal(id){
   if(amount<=0){alert("予算額を入力してください。");return;}
   if(!start||!end||end<start){alert("期間を正しく設定してください（終了日は開始日以降）。");return;}
   const obj={name,amount,start,end,category:document.getElementById("g-cat").value};
+  let budgetId=id;
   if(id){const b=db.budgets.find(x=>x.id===id); Object.assign(b,obj);}
-  else{db.budgets.push({id:uid(),...obj});}
+  else{budgetId=uid(); db.budgets.push({id:budgetId,...obj});}
   const totalDays=daysInc(start,end)||1;
   const overlaps=b=>((b.start||"0000-00-00")<=end && (b.end||"9999-99-99")>=start);
-  db.calBudgets=(db.calBudgets||[]).filter(b=>!overlaps(b));
-  db.calBudgets.push({id:uid(), daily:Math.round(amount/totalDays), start, end});
+  db.calBudgets=(db.calBudgets||[]).filter(b=>!overlaps(b) && b.budgetId!==budgetId);
+  db.calBudgets.push({id:uid(), budgetId, daily:Math.round(amount/totalDays), start, end});
   db.calBudgets.sort((a,b)=>(a.start||"")<(b.start||"")?-1:1);
   closeSheet(); save();
 }
 function delGoal(id){
-  if(!confirm("この予算を削除しますか？")) return;
+  if(!confirm("この予算を削除しますか？カレンダーに反映されているこの予算の表示も一緒に消えます。")) return;
   db.budgets=db.budgets.filter(b=>b.id!==id);
+  db.calBudgets=(db.calBudgets||[]).filter(b=>b.budgetId!==id);
   closeSheet(); save();
 }
 
