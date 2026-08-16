@@ -137,6 +137,11 @@
   <!-- DASHBOARD -->
   <section id="v-dash" class="view active">
     <h2>使える金額</h2>
+    <div class="seg" id="spend-seg" style="margin-bottom:10px;">
+      <button data-m="payday">給与日まで</button>
+      <button data-m="year">年末まで</button>
+      <button data-m="fiscal">年度末まで</button>
+    </div>
     <div class="spend-card">
       <span style="font-size:13px; color:var(--muted);" id="d-spend-until"></span>
       <p class="amt-big" id="d-spend-perday">¥0<span style="font-size:14px; font-weight:400; color:var(--muted);"> /日</span></p>
@@ -793,19 +798,43 @@ function planItems(){
   const rec=(db.recurring||[]).map(r=>{const n=nextOccurrence(r); return n?{...r,date:n.date,_monthStr:n.monthStr,_kind2:"recurring"}:null;}).filter(Boolean);
   return [...sched,...rec].sort((a,b)=>a.date<b.date?-1:1);
 }
-function spendableInfo(){
-  const payday=nextPayday(), t=today();
-  const remDays=Math.max(1, daysInc(t,payday));
+function yearEndDate(){return `${new Date().getFullYear()}-12-31`;}
+function fiscalYearEndDate(){
+  const now=new Date();
+  const y = (now.getMonth()+1<=3) ? now.getFullYear() : now.getFullYear()+1;
+  return `${y}-03-31`;
+}
+let spendMode = localStorage.getItem("spendMode")||"payday";
+function setSpendMode(m){
+  spendMode=m; localStorage.setItem("spendMode",m);
+  document.querySelectorAll("#spend-seg button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
+  renderSpendable();
+}
+function spendTarget(){
+  if(spendMode==="year") return yearEndDate();
+  if(spendMode==="fiscal") return fiscalYearEndDate();
+  return nextPayday();
+}
+function spendLabel(target){
+  const wd=["日","月","火","水","木","金","土"][pDate(target).getDay()];
+  const dtxt=target.slice(5).replace("-","/");
+  if(spendMode==="year") return `${target.slice(0,4)}年末(${dtxt}${wd}) まで`;
+  if(spendMode==="fiscal") return `年度末(${dtxt}${wd}) まで`;
+  return `給与日 ${dtxt}(${wd}) まで`;
+}
+function spendableInfo(target){
+  const t=today();
+  const remDays=Math.max(1, daysInc(t,target));
   const liquid=liquidAssets();
-  const pending=planItems().filter(p=>p.kind==="expense" && p.date<=payday).reduce((s,p)=>s+p.amount,0);
+  const pending=planItems().filter(p=>p.kind==="expense" && p.date<=target).reduce((s,p)=>s+p.amount,0);
   const spendable=Math.max(0, liquid-pending);
-  return {payday,remDays,liquid,pending,spendable,perDay:spendable/remDays};
+  return {target,remDays,liquid,pending,spendable,perDay:spendable/remDays};
 }
 function renderSpendable(){
   const el=document.getElementById("d-spend-until"); if(!el) return;
-  const info=spendableInfo();
-  const wd=["日","月","火","水","木","金","土"][pDate(info.payday).getDay()];
-  el.textContent=`給与日 ${info.payday.slice(5).replace("-","/")}(${wd}) まで あと${info.remDays}日`;
+  const target=spendTarget();
+  const info=spendableInfo(target);
+  el.textContent=`${spendLabel(target)} あと${info.remDays}日`;
   document.getElementById("d-spend-perday").innerHTML=`${yen(info.perDay)}<span style="font-size:14px; font-weight:400; color:var(--muted);"> /日</span>`;
   document.getElementById("d-spend-detail").textContent = info.pending>0
     ? `使えるお金 ${yen(info.liquid)} − 今後の支払い予定 ${yen(info.pending)} ＝ ${yen(info.spendable)}`
@@ -1124,6 +1153,7 @@ function applyTheme(t){
 document.querySelectorAll("#theme-seg button").forEach(b=>b.onclick=()=>applyTheme(b.dataset.t));
 applyTheme(localStorage.getItem("theme")||"auto");
 document.querySelectorAll("#b-viewseg button").forEach(b=>b.onclick=()=>setBView(b.dataset.v));
+document.querySelectorAll("#spend-seg button").forEach(b=>{b.onclick=()=>setSpendMode(b.dataset.m); b.classList.toggle("on",b.dataset.m===spendMode);});
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
