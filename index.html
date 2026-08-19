@@ -151,9 +151,11 @@
     <h2>総資産</h2>
     <div class="tiles">
       <div class="tile hero" style="grid-column:1/3;">
-        <p class="lbl">合計</p>
+        <p class="lbl">合計（資産）</p>
         <p class="val" id="d-total">¥0</p>
       </div>
+      <div class="tile" id="d-liab-tile" style="display:none;"><p class="lbl">負債</p><p class="val neg" id="d-liab">¥0</p></div>
+      <div class="tile" id="d-net-tile" style="display:none;"><p class="lbl">純資産</p><p class="val" id="d-net">¥0</p></div>
       <div class="tile"><p class="lbl">今月の収入</p><p class="val" id="d-inc">¥0</p></div>
       <div class="tile"><p class="lbl">今月の支出</p><p class="val" id="d-exp">¥0</p></div>
       <div class="tile" style="grid-column:1/3;"><p class="lbl">今月の収支</p><p class="val" id="d-bal">¥0</p></div>
@@ -184,6 +186,10 @@
 
     <div class="qhead"><span class="t">電子マネーチャージ</span><button class="e" onclick="openChargeManager()">編集</button></div>
     <div class="qwrap" id="a-charge"></div>
+
+    <div class="qhead"><span class="t">負債（カードローンなど）</span><button class="e" onclick="openLoan()">＋ 追加</button></div>
+    <div id="a-loans"></div>
+    <p class="empty" style="padding:10px 16px;">負債の残高は総資産には含めず「純資産」として別に表示します。毎月の返済額を設定すると、「使える金額」や「今後の予定」に反映されます。</p>
   </section>
 
   <!-- BUDGET -->
@@ -287,7 +293,7 @@
 
 <script>
 const TYPES=[["bank","銀行"],["stock","証券"],["cash","現金"],["emoney","電子マネー"],["other","その他"]];
-const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","その他"];
+const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","返済","その他"];
 const INC_CATS=["給与","賞与","その他収入"];
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -300,7 +306,7 @@ let curMonth=today().slice(0,7);
 function load(){
   try{const d=JSON.parse(localStorage.getItem("assetApp"));
     if(d&&d.accounts){
-      ["snapshots","transactions","budgets","quickItems","charges","scheduled","recurring"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
+      ["snapshots","transactions","budgets","quickItems","charges","scheduled","recurring","loans"].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[];});
       d.recurring.forEach(r=>{if(!Array.isArray(r.confirmed))r.confirmed=[];});
       if(typeof d.payday!=="number") d.payday=25;
       if(!Array.isArray(d.calBudgets)){
@@ -311,7 +317,7 @@ function load(){
       }
       delete d.dailyBudget; delete d.calBudget;
       return d;}}catch(e){}
-  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25};
+  return {accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25, loans:[]};
 }
 function save(){localStorage.setItem("assetApp",JSON.stringify(db)); renderAll();}
 
@@ -329,10 +335,21 @@ function show(v){
 
 /* ---------- dashboard ---------- */
 function totalAssets(){return db.accounts.reduce((s,a)=>s+(+a.balance||0),0);}
+function totalLiabilities(){return (db.loans||[]).reduce((s,l)=>s+(+l.balance||0),0);}
+function netWorth(){return totalAssets()-totalLiabilities();}
 function monthTxns(m){return db.transactions.filter(t=>t.date.slice(0,7)===m);}
 
 function renderDash(){
   document.getElementById("d-total").textContent=yen(totalAssets());
+  const liabTile=document.getElementById("d-liab-tile"), netTile=document.getElementById("d-net-tile");
+  if(db.loans&&db.loans.length){
+    liabTile.style.display=""; netTile.style.display="";
+    document.getElementById("d-liab").textContent=yen(totalLiabilities());
+    const net=netWorth(), netEl=document.getElementById("d-net");
+    netEl.textContent=yen(net); netEl.className="val "+(net>=0?"":"neg");
+  }else{
+    liabTile.style.display="none"; netTile.style.display="none";
+  }
   const tx=monthTxns(today().slice(0,7));
   const inc=tx.filter(t=>t.kind==="income").reduce((s,t)=>s+t.amount,0);
   const exp=tx.filter(t=>t.kind==="expense").reduce((s,t)=>s+t.amount,0);
@@ -824,13 +841,32 @@ function spendLabel(target){
   if(spendMode==="fiscal") return `年度末(${dtxt}${wd}) まで`;
   return `給与日 ${dtxt}(${wd}) まで`;
 }
+function pendingByKind(kind,target){
+  let total=0;
+  (db.scheduled||[]).forEach(s=>{ if(s.kind===kind && s.date<=target) total+=(+s.amount||0); });
+  (db.recurring||[]).forEach(r=>{
+    if(r.kind!==kind) return;
+    let d=new Date(); d.setDate(1); d.setHours(0,0,0,0);
+    for(let i=0;i<36;i++){
+      const y=d.getFullYear(), m=d.getMonth()+1;
+      const monthStr=`${y}-${String(m).padStart(2,"0")}`;
+      const dim=new Date(y,m,0).getDate();
+      const ds=`${y}-${String(m).padStart(2,"0")}-${String(Math.min(r.day,dim)).padStart(2,"0")}`;
+      if(ds>target) break;
+      if(!(r.confirmed||[]).includes(monthStr)) total+=(+r.amount||0);
+      d.setMonth(d.getMonth()+1);
+    }
+  });
+  return total;
+}
 function spendableInfo(target){
   const t=today();
   const remDays=Math.max(1, daysInc(t,target));
   const liquid=liquidAssets();
-  const pending=planItems().filter(p=>p.kind==="expense" && p.date<=target).reduce((s,p)=>s+p.amount,0);
-  const spendable=Math.max(0, liquid-pending);
-  return {target,remDays,liquid,pending,spendable,perDay:spendable/remDays};
+  const pending=pendingByKind("expense",target);
+  const pendingIncome=pendingByKind("income",target);
+  const spendable=Math.max(0, liquid+pendingIncome-pending);
+  return {target,remDays,liquid,pending,pendingIncome,spendable,perDay:spendable/remDays};
 }
 function renderSpendable(){
   const el=document.getElementById("d-spend-until"); if(!el) return;
@@ -838,9 +874,15 @@ function renderSpendable(){
   const info=spendableInfo(target);
   el.textContent=`${spendLabel(target)} あと${info.remDays}日`;
   document.getElementById("d-spend-perday").innerHTML=`${yen(info.perDay)}<span style="font-size:14px; font-weight:400; color:var(--muted);"> /日</span>`;
-  document.getElementById("d-spend-detail").textContent = info.pending>0
-    ? `使えるお金 ${yen(info.liquid)} − 今後の支払い予定 ${yen(info.pending)} ＝ ${yen(info.spendable)}`
-    : `使えるお金 ${yen(info.liquid)}（証券口座を除く）`;
+  const dEl=document.getElementById("d-spend-detail");
+  if(info.pendingIncome>0 || info.pending>0){
+    const parts=[`使えるお金 ${yen(info.liquid)}`];
+    if(info.pendingIncome>0) parts.push(`＋ 今後の収入予定 ${yen(info.pendingIncome)}`);
+    if(info.pending>0) parts.push(`− 今後の支払い予定 ${yen(info.pending)}`);
+    dEl.textContent=parts.join(" ")+` ＝ ${yen(info.spendable)}`;
+  }else{
+    dEl.textContent=`使えるお金 ${yen(info.liquid)}（証券口座を除く）`;
+  }
 }
 function renderPlan(){
   const el=document.getElementById("d-plan"); if(!el) return;
@@ -892,7 +934,9 @@ function savePlanConfirm(){
     db.scheduled=db.scheduled.filter(x=>x.id!==planConfirmId);
   }else{
     const r=db.recurring.find(x=>x.id===planConfirmId);
-    if(r){ r.confirmed=r.confirmed||[]; if(!r.confirmed.includes(planConfirmMonth)) r.confirmed.push(planConfirmMonth); }
+    if(r){ r.confirmed=r.confirmed||[]; if(!r.confirmed.includes(planConfirmMonth)) r.confirmed.push(planConfirmMonth);
+      if(r.loanId){ const loan=db.loans.find(x=>x.id===r.loanId); if(loan) loan.balance=Math.max(0,(+loan.balance||0)-amount); }
+    }
   }
   curMonth=date.slice(0,7);
   closeSheet(); save(); toast(label+" を記録しました");
@@ -1089,10 +1133,91 @@ function saveCharge(id){
 }
 function delCharge(id){if(!confirm("このチャージを削除しますか？"))return; db.charges=db.charges.filter(x=>x.id!==id); closeSheet(); save();}
 
+/* ---------- loans (負債) ---------- */
+function loanPayoff(l){
+  const bal=+l.balance||0, pay=+l.monthlyPayment||0, rate=(+l.rate||0)/100/12;
+  if(bal<=0) return {done:true};
+  if(pay<=0) return {noPayment:true};
+  if(pay<=bal*rate) return {stuck:true, monthlyInterest:bal*rate};
+  let b=bal, months=0, totalInterest=0;
+  while(b>0 && months<600){
+    const interest=b*rate; totalInterest+=interest;
+    b=b+interest-pay; months++;
+  }
+  return {months, totalInterest, years:Math.floor(months/12), remMonths:months%12};
+}
+function syncLoanRecurring(loan){
+  let r=db.recurring.find(x=>x.loanId===loan.id);
+  if(loan.monthlyPayment>0){
+    const obj={label:loan.name+" 返済", kind:"expense", category:"返済", amount:loan.monthlyPayment, day:loan.dueDay||27, loanId:loan.id};
+    if(r){ Object.assign(r,obj); if(!Array.isArray(r.confirmed))r.confirmed=[]; }
+    else{ db.recurring.push({id:uid(), confirmed:[], ...obj}); }
+  }else if(r){
+    db.recurring=db.recurring.filter(x=>x.id!==r.id);
+  }
+}
+function renderLoans(){
+  const el=document.getElementById("a-loans"); if(!el) return;
+  if(!db.loans.length){el.innerHTML='<p class="empty">負債はありません。「＋ 追加」から登録できます。</p>'; return;}
+  el.innerHTML=db.loans.map(l=>{
+    const p=loanPayoff(l);
+    let payoffTxt;
+    if(p.done) payoffTxt="完済済み";
+    else if(p.noPayment) payoffTxt="返済計画が未設定です";
+    else if(p.stuck) payoffTxt=`⚠️ この返済額だと元金が減りません（月の利息 目安${yen(p.monthlyInterest)}）`;
+    else payoffTxt=(p.years>0?`完済まで目安 約${p.years}年${p.remMonths}ヶ月`:`完済まで目安 約${p.remMonths}ヶ月`)+`（利息総額目安 ${yen(p.totalInterest)}）`;
+    return `<div class="card pad" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <span style="font-size:16px; font-weight:600;">${esc(l.name)}</span>
+        <span style="font-size:18px; font-weight:600; color:var(--red);">${yen(l.balance)}</span>
+      </div>
+      <p style="font-size:12px; color:var(--muted); margin:4px 0 0;">${l.monthlyPayment?`月${yen(l.monthlyPayment)}返済（毎月${l.dueDay||27}日）・ ${payoffTxt}`:payoffTxt}</p>
+      <div class="btns" style="margin-top:10px;"><button class="btn" onclick="openLoan('${l.id}')">編集</button>${l.monthlyPayment?`<button class="btn primary" onclick="quickRepay('${l.id}')">返済を記録</button>`:""}</div>
+    </div>`;
+  }).join("");
+}
+function quickRepay(loanId){
+  const r=db.recurring.find(x=>x.loanId===loanId);
+  if(!r){alert("先に毎月の返済額を設定してください。");return;}
+  openPlanConfirm("recurring", r.id);
+}
+function openLoan(id){
+  const l=id?db.loans.find(x=>x.id===id):{name:"",balance:"",rate:15,monthlyPayment:"",dueDay:27};
+  sheet.innerHTML=`<h3>${id?"負債を編集":"負債を追加"}</h3>
+    <div class="field"><label>名前</label><input id="l-name" value="${esc(l.name)}" placeholder="例：カードローン"></div>
+    <div class="field"><label>残高（円）</label><input id="l-bal" type="number" inputmode="numeric" value="${l.balance}" placeholder="0"></div>
+    <div class="field"><label>金利（年率％・任意）</label><input id="l-rate" type="number" inputmode="decimal" value="${l.rate}" placeholder="15"></div>
+    <div class="field"><label>毎月の返済額（円・任意）</label><input id="l-pay" type="number" inputmode="numeric" value="${l.monthlyPayment}" placeholder="0"></div>
+    <div class="field"><label>返済日（毎月・1〜28）</label><input id="l-day" type="number" min="1" max="28" value="${l.dueDay||27}"></div>
+    <div class="btns"><button class="btn primary" onclick="saveLoan('${id||""}')">保存</button></div>
+    ${id?`<button class="del" onclick="delLoan('${id}')">この負債を削除</button>`:""}`;
+  ov.classList.add("show");
+  setTimeout(()=>document.getElementById("l-name").focus(),100);
+}
+function saveLoan(id){
+  const name=document.getElementById("l-name").value.trim();
+  if(!name){alert("名前を入力してください。");return;}
+  const obj={name, balance:+document.getElementById("l-bal").value||0,
+    rate:+document.getElementById("l-rate").value||0,
+    monthlyPayment:+document.getElementById("l-pay").value||0,
+    dueDay:Math.min(28,Math.max(1,+document.getElementById("l-day").value||27))};
+  let loan;
+  if(id){loan=db.loans.find(x=>x.id===id); Object.assign(loan,obj);}
+  else{loan={id:uid(),...obj}; db.loans.push(loan);}
+  syncLoanRecurring(loan);
+  closeSheet(); save();
+}
+function delLoan(id){
+  if(!confirm("この負債を削除しますか？紐づく返済予定も削除されます。")) return;
+  db.loans=db.loans.filter(x=>x.id!==id);
+  db.recurring=db.recurring.filter(x=>x.loanId!==id);
+  closeSheet(); save();
+}
+
 /* ---------- settings / backup ---------- */
 function renderSettings(){
   document.getElementById("s-stats").innerHTML=
-    `口座：${db.accounts.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
+    `口座：${db.accounts.length} 件<br>負債：${db.loans.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
   const pi=document.getElementById("payday-input"); if(pi) pi.value=db.payday;
   const ci=document.getElementById("calbudget-info");
   if(ci){const list=db.calBudgets||[];
@@ -1130,7 +1255,8 @@ function importData(e){
           :(d.calBudget&&d.calBudget.daily>0)?[{id:uid(),daily:d.calBudget.daily,start:d.calBudget.start||null,end:d.calBudget.end||null}]:[],
         scheduled:Array.isArray(d.scheduled)?d.scheduled:[],
         recurring:Array.isArray(d.recurring)?d.recurring.map(r=>({confirmed:[],...r})):[],
-        payday:typeof d.payday==="number"?d.payday:25};
+        payday:typeof d.payday==="number"?d.payday:25,
+        loans:Array.isArray(d.loans)?d.loans:[]};
       save(); alert("読み込みました。");
     }catch(err){alert("ファイルを読み込めませんでした。書き出したJSONファイルを選んでください。");}
   };
@@ -1138,7 +1264,7 @@ function importData(e){
 }
 function resetData(){
   if(!confirm("すべての口座・収支・記録を削除します。元に戻せません。よろしいですか？")) return;
-  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25};
+  db={accounts:[], snapshots:[], transactions:[], budgets:[], quickItems:[], charges:[], calBudgets:[], scheduled:[], recurring:[], payday:25, loans:[]};
   save(); alert("削除しました。");
 }
 
@@ -1159,7 +1285,7 @@ document.querySelectorAll("#spend-seg button").forEach(b=>{b.onclick=()=>setSpen
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function renderAll(){renderDash(); renderAssets(); renderCharges(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
+function renderAll(){renderDash(); renderAssets(); renderCharges(); renderLoans(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
 renderAll();
 </script>
 </body>
