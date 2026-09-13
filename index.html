@@ -162,6 +162,17 @@
       <div class="tile" style="grid-column:1/3;"><p class="lbl">今月の収支</p><p class="val" id="d-bal">¥0</p></div>
     </div>
 
+    <h2>理想の貯金額との差</h2>
+    <div class="spend-card">
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:6px;">
+        <span>理想（貯金プラン通りなら）</span><span id="d-ideal-amt">¥0</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--muted); margin-bottom:6px;">
+        <span>実際（純資産）</span><span id="d-ideal-actual">¥0</span>
+      </div>
+      <p class="amt-big" id="d-ideal-diff" style="margin-top:8px;">¥0</p>
+    </div>
+
     <div class="qhead"><span class="t">今後の予定</span><button class="e" onclick="openPlanManager()">編集</button></div>
     <div class="card" id="d-plan"></div>
 
@@ -349,6 +360,48 @@ function totalLiabilities(){return (db.loans||[]).reduce((s,l)=>s+(+l.balance||0
 function netWorth(){return totalAssets()-totalLiabilities();}
 function monthTxns(m){return db.transactions.filter(t=>t.date.slice(0,7)===m);}
 
+/* ---------- 理想の貯金額（ベンチマーク積立プラン） ----------
+   2015/4〜: 毎月2万円＋7月/12月に20万円ずつ
+   2025/4〜2026/3: 積立停止
+   2026/4〜2026/6: 月2万円で再開
+   2026/7〜: 月4万円にUP（7月/12月の20万円は継続）
+   年利5%、月複利で運用 */
+const IDEAL_RATE_ANNUAL=0.05;
+const IDEAL_START_IDX=2015*12+4;
+const IDEAL_PAUSE_START_IDX=2025*12+4;
+const IDEAL_PAUSE_END_IDX=2026*12+3;
+const IDEAL_STEPUP_IDX=2026*12+7;
+const IDEAL_BASE_BEFORE=20000, IDEAL_BASE_AFTER=40000, IDEAL_BONUS=200000;
+function idealContribution(idx,m){
+  if(idx<IDEAL_START_IDX) return 0;
+  if(idx>=IDEAL_PAUSE_START_IDX && idx<=IDEAL_PAUSE_END_IDX) return 0;
+  const base=idx>=IDEAL_STEPUP_IDX ? IDEAL_BASE_AFTER : IDEAL_BASE_BEFORE;
+  const bonus=(m===7||m===12) ? IDEAL_BONUS : 0;
+  return base+bonus;
+}
+function idealSavingsNow(){
+  const t=today();
+  const targetIdx=(+t.slice(0,4))*12+(+t.slice(5,7));
+  const r=Math.pow(1+IDEAL_RATE_ANNUAL,1/12)-1;
+  let balance=0;
+  for(let idx=IDEAL_START_IDX; idx<=targetIdx; idx++){
+    const m=((idx-1)%12)+1;
+    balance=balance*(1+r)+idealContribution(idx,m);
+  }
+  return balance;
+}
+function renderIdealSavings(){
+  const el=document.getElementById("d-ideal-amt"); if(!el) return;
+  const ideal=idealSavingsNow();
+  const actual=netWorth();
+  const diff=actual-ideal;
+  document.getElementById("d-ideal-amt").textContent=yen(ideal);
+  document.getElementById("d-ideal-actual").textContent=yen(actual);
+  const diffEl=document.getElementById("d-ideal-diff");
+  diffEl.innerHTML=(diff>=0?"+":"−")+yen(Math.abs(diff)).slice(1)+`<span style="font-size:14px; font-weight:400; color:var(--muted);"> ${diff>=0?"リードしています":"遅れています"}</span>`;
+  diffEl.style.color=diff>=0?"var(--green)":"var(--red)";
+}
+
 function renderDash(){
   document.getElementById("d-total").textContent=yen(totalAssets());
   const liabTile=document.getElementById("d-liab-tile"), netTile=document.getElementById("d-net-tile");
@@ -395,6 +448,7 @@ function renderDash(){
 
   renderSpendable();
   renderPlan();
+  renderIdealSavings();
 }
 
 function trendSeries(){
