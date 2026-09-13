@@ -56,6 +56,7 @@
   .tag{display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; color:#fff; margin-left:6px; vertical-align:1px;}
   .tag.bank{background:var(--c-bank);} .tag.stock{background:var(--c-stock);}
   .tag.cash{background:var(--c-cash);} .tag.other{background:var(--c-other);} .tag.emoney{background:var(--c-emoney);}
+  .tag.personal{background:var(--blue);} .tag.family{background:var(--c-stock);}
   /* bars */
   .bar-line{margin:10px 0;}
   .bar-line .top{display:flex; justify-content:space-between; font-size:14px; margin-bottom:5px;}
@@ -202,6 +203,8 @@
     <div class="tiles">
       <div class="tile"><p class="lbl">収入</p><p class="val pos" id="b-inc">¥0</p></div>
       <div class="tile"><p class="lbl">支出</p><p class="val neg" id="b-exp">¥0</p></div>
+      <div class="tile"><p class="lbl">個人支出</p><p class="val neg" id="b-exp-personal">¥0</p></div>
+      <div class="tile"><p class="lbl">家族支出</p><p class="val neg" id="b-exp-family">¥0</p></div>
       <div class="tile" style="grid-column:1/3;"><p class="lbl">収支</p><p class="val" id="b-bal">¥0</p></div>
     </div>
     <div class="qhead"><span class="t">よく使う項目</span><button class="e" onclick="openQuickManager()">編集</button></div>
@@ -210,6 +213,7 @@
     <div class="seg" id="b-viewseg" style="margin:18px 4px 2px;">
       <button data-v="list" class="on">リスト</button>
       <button data-v="cal">カレンダー</button>
+      <button data-v="monthly">月次</button>
     </div>
     <div id="b-listview">
       <h2>明細</h2>
@@ -223,6 +227,10 @@
       </div>
       <div class="cal" id="b-cal"></div>
       <p class="empty" id="b-calnote" style="padding:10px 4px 0; text-align:left; font-size:12px;"></p>
+    </div>
+    <div id="b-monthlyview" style="display:none;">
+      <h2>月次まとめ</h2>
+      <div class="card" id="b-monthly"></div>
     </div>
   </section>
 
@@ -293,6 +301,8 @@
 
 <script>
 const TYPES=[["bank","銀行"],["stock","証券"],["cash","現金"],["emoney","電子マネー"],["other","その他"]];
+const SCOPES=[["personal","個人"],["family","家族"]];
+const scopeName=s=>(SCOPES.find(x=>x[0]===s)||SCOPES[0])[1];
 const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","返済","その他"];
 const INC_CATS=["給与","賞与","その他収入"];
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
@@ -448,32 +458,57 @@ function shiftMonth(d){
   curMonth=fmtDate(dt).slice(0,7);
   renderBudget();
 }
+function scopeOf(t){return t.scope==="family"?"family":"personal";}
 function renderBudget(){
   const [y,m]=curMonth.split("-");
   document.getElementById("b-month").textContent=`${y}年${+m}月`;
   const tx=monthTxns(curMonth).sort((a,b)=>a.date<b.date?1:-1);
   const inc=tx.filter(t=>t.kind==="income").reduce((s,t)=>s+t.amount,0);
   const exp=tx.filter(t=>t.kind==="expense").reduce((s,t)=>s+t.amount,0);
+  const expPersonal=tx.filter(t=>t.kind==="expense"&&scopeOf(t)==="personal").reduce((s,t)=>s+t.amount,0);
+  const expFamily=tx.filter(t=>t.kind==="expense"&&scopeOf(t)==="family").reduce((s,t)=>s+t.amount,0);
   document.getElementById("b-inc").textContent=yen(inc);
   document.getElementById("b-exp").textContent=yen(exp);
+  document.getElementById("b-exp-personal").textContent=yen(expPersonal);
+  document.getElementById("b-exp-family").textContent=yen(expFamily);
   const bal=document.getElementById("b-bal");
   bal.textContent=(inc-exp>=0?"+¥":"−¥")+Math.abs(inc-exp).toLocaleString("ja-JP");
   bal.className="val "+(inc-exp>=0?"pos":"neg");
   const el=document.getElementById("b-list");
   el.innerHTML = tx.length ? tx.map(t=>`
     <div class="row" onclick="openTxn('${t.id}')">
-      <div class="main"><span class="name">${esc(t.category)}${t.memo?' ・ '+esc(t.memo):''}</span>
+      <div class="main"><span class="name">${esc(t.category)}${t.memo?' ・ '+esc(t.memo):''}<span class="tag ${scopeOf(t)}">${scopeName(scopeOf(t))}</span></span>
       <span class="sub">${t.date.slice(5).replace('-','/')}</span></div>
       <span class="amt ${t.kind==='income'?'pos':'neg'}">${t.kind==='income'?'+':'−'}${yen(t.amount)}</span>
     </div>`).join("") : '<p class="empty">この月の記録はまだありません。</p>';
   renderCalendar();
+  renderMonthly();
 }
 let bView="list";
 function setBView(v){
   bView=v;
   document.getElementById("b-listview").style.display=v==="list"?"block":"none";
   document.getElementById("b-calview").style.display=v==="cal"?"block":"none";
+  document.getElementById("b-monthlyview").style.display=v==="monthly"?"block":"none";
   document.querySelectorAll("#b-viewseg button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+}
+function renderMonthly(){
+  const el=document.getElementById("b-monthly"); if(!el) return;
+  const months=[...new Set(db.transactions.map(t=>t.date.slice(0,7)))].sort().reverse();
+  if(!months.length){el.innerHTML='<p class="empty">まだ記録がありません。</p>'; return;}
+  el.innerHTML=months.map(mo=>{
+    const tx=db.transactions.filter(t=>t.date.slice(0,7)===mo);
+    const inc=tx.filter(t=>t.kind==="income").reduce((s,t)=>s+t.amount,0);
+    const p=tx.filter(t=>t.kind==="expense"&&scopeOf(t)==="personal").reduce((s,t)=>s+t.amount,0);
+    const f=tx.filter(t=>t.kind==="expense"&&scopeOf(t)==="family").reduce((s,t)=>s+t.amount,0);
+    const bal=inc-p-f;
+    const [y,m]=mo.split("-");
+    return `<div class="row" onclick="curMonth='${mo}'; setBView('list'); renderBudget();">
+      <div class="main"><span class="name">${y}年${+m}月</span>
+      <span class="sub">個人 ${yen(p)} ・ 家族 ${yen(f)} ・ 収入 ${yen(inc)}</span></div>
+      <span class="amt ${bal>=0?'pos':'neg'}">${bal>=0?'+':'−'}${yen(Math.abs(bal))}</span>
+    </div>`;
+  }).join("");
 }
 function renderCalendar(){
   const el=document.getElementById("b-cal"); if(!el) return;
@@ -582,14 +617,16 @@ function delAccount(id){
   closeSheet(); save();
 }
 
-let txnKind="expense";
+let txnKind="expense", txnScope="personal";
 function openTxn(id,defDate){
-  const t=id?db.transactions.find(x=>x.id===id):{date:defDate||today(),amount:"",kind:"expense",category:"食費",memo:""};
-  txnKind=t.kind;
+  const t=id?db.transactions.find(x=>x.id===id):{date:defDate||today(),amount:"",kind:"expense",category:"食費",memo:"",scope:"personal"};
+  txnKind=t.kind; txnScope=scopeOf(t);
   sheet.innerHTML=`
     <h3>${id?"収支を編集":"収支を記録"}</h3>
     <div class="field"><label>種別</label><div class="seg" id="f-seg">
       <button data-k="expense">支出</button><button data-k="income">収入</button></div></div>
+    <div class="field"><label>区分</label><div class="seg" id="f-scope">
+      <button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>日付</label><input id="f-date" type="date" value="${t.date}"></div>
     <div class="field"><label>金額（円）</label><input id="f-amt" type="number" inputmode="numeric" value="${t.amount}" placeholder="0"></div>
     <div class="field"><label>カテゴリ</label><select id="f-cat"></select></div>
@@ -597,10 +634,12 @@ function openTxn(id,defDate){
     <div class="btns"><button class="btn primary" onclick="saveTxn('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delTxn('${id}')">この記録を削除</button>`:""}`;
   document.querySelectorAll("#f-seg button").forEach(b=>b.onclick=()=>{txnKind=b.dataset.k; syncSeg(); fillCats(t.category);});
-  syncSeg(); fillCats(t.category);
+  document.querySelectorAll("#f-scope button").forEach(b=>b.onclick=()=>{txnScope=b.dataset.s; syncScopeSeg("f-scope",txnScope);});
+  syncSeg(); syncScopeSeg("f-scope",txnScope); fillCats(t.category);
   ov.classList.add("show");
 }
 function syncSeg(){document.querySelectorAll("#f-seg button").forEach(b=>b.classList.toggle("on",b.dataset.k===txnKind));}
+function syncScopeSeg(id,val){document.querySelectorAll(`#${id} button`).forEach(b=>b.classList.toggle("on",b.dataset.s===val));}
 function fillCats(sel){
   const cats=txnKind==="income"?INC_CATS:EXP_CATS;
   document.getElementById("f-cat").innerHTML=cats.map(c=>`<option ${c===sel?"selected":""}>${c}</option>`).join("");
@@ -608,7 +647,7 @@ function fillCats(sel){
 function saveTxn(id){
   const amt=+document.getElementById("f-amt").value||0;
   if(amt<=0){alert("金額を入力してください。");return;}
-  const obj={date:document.getElementById("f-date").value||today(), amount:amt, kind:txnKind,
+  const obj={date:document.getElementById("f-date").value||today(), amount:amt, kind:txnKind, scope:txnScope,
     category:document.getElementById("f-cat").value, memo:document.getElementById("f-memo").value.trim()};
   if(id){const t=db.transactions.find(x=>x.id===id); Object.assign(t,obj);}
   else{db.transactions.push({id:uid(),...obj});}
@@ -901,7 +940,7 @@ function renderPlan(){
   el.innerHTML = due.map(p=>row(p,true)).join("") + future.map(p=>row(p,false)).join("");
 }
 
-let planConfirmKind, planConfirmId, planConfirmMonth, planConfirmTxnKind;
+let planConfirmKind, planConfirmId, planConfirmMonth, planConfirmTxnKind, planConfirmScope;
 function openPlanConfirm(kind2,id){
   let p;
   if(kind2==="scheduled"){
@@ -912,15 +951,18 @@ function openPlanConfirm(kind2,id){
     const n=nextOccurrence(r); if(!n) return;
     p={...r, date:n.date, _monthStr:n.monthStr};
   }
-  planConfirmKind=kind2; planConfirmId=id; planConfirmMonth=p._monthStr; planConfirmTxnKind=p.kind;
+  planConfirmKind=kind2; planConfirmId=id; planConfirmMonth=p._monthStr; planConfirmTxnKind=p.kind; planConfirmScope=scopeOf(p);
   sheet.innerHTML=`<h3>予定を記録</h3>
     <div class="field"><label>内容</label><input id="pc-label" value="${esc(p.label)}"></div>
+    <div class="field"><label>区分</label><div class="seg" id="pc-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>日付</label><input id="pc-date" type="date" value="${p.date}"></div>
     <div class="field"><label>金額（円）</label><input id="pc-amt" type="number" inputmode="numeric" value="${p.amount}"></div>
     <div class="field"><label>カテゴリ</label><select id="pc-cat">${(p.kind==="income"?INC_CATS:EXP_CATS).map(c=>`<option ${c===p.category?"selected":""}>${c}</option>`).join("")}</select></div>
     <div class="btns"><button class="btn primary" onclick="savePlanConfirm()">記録する（実績にする）</button></div>
     ${kind2==="recurring"?'<button class="del" style="color:var(--blue);" onclick="skipPlanOccurrence()">この回は記録しない（スキップ）</button>':""}
     <button class="del" onclick="openPlanItem('${kind2}','${id}')">この予定を編集・削除</button>`;
+  document.querySelectorAll("#pc-scope button").forEach(b=>b.onclick=()=>{planConfirmScope=b.dataset.s; syncScopeSeg("pc-scope",planConfirmScope);});
+  syncScopeSeg("pc-scope",planConfirmScope);
   ov.classList.add("show");
 }
 function savePlanConfirm(){
@@ -929,7 +971,7 @@ function savePlanConfirm(){
   const amount=+document.getElementById("pc-amt").value||0;
   const category=document.getElementById("pc-cat").value;
   if(amount<=0){alert("金額を入力してください。");return;}
-  db.transactions.push({id:uid(),date,amount,kind:planConfirmTxnKind,category,memo:label});
+  db.transactions.push({id:uid(),date,amount,kind:planConfirmTxnKind,category,memo:label,scope:planConfirmScope});
   if(planConfirmKind==="scheduled"){
     db.scheduled=db.scheduled.filter(x=>x.id!==planConfirmId);
   }else{
@@ -959,16 +1001,17 @@ function openPlanManager(){
     <div class="btns"><button class="btn primary" onclick="openPlanItem()">＋ 新規追加</button></div>`;
   ov.classList.add("show");
 }
-let planKind="expense", planFreq="once";
+let planKind="expense", planFreq="once", planScope="personal";
 function openPlanItem(kind2,id){
-  const p = !kind2 ? {label:"",kind:"expense",category:"食費",amount:"",date:today(),day:25}
+  const p = !kind2 ? {label:"",kind:"expense",category:"食費",amount:"",date:today(),day:25,scope:"personal"}
     : kind2==="scheduled" ? {...db.scheduled.find(x=>x.id===id)}
     : {...db.recurring.find(x=>x.id===id)};
-  planKind=p.kind; planFreq = kind2==="recurring" ? "monthly" : "once";
+  planKind=p.kind; planFreq = kind2==="recurring" ? "monthly" : "once"; planScope=scopeOf(p);
   const isEdit=!!kind2;
   sheet.innerHTML=`<h3>${isEdit?"予定を編集":"予定を追加"}</h3>
     <div class="field"><label>名前</label><input id="p-label" value="${esc(p.label)}" placeholder="例：家賃"></div>
     <div class="field"><label>種別</label><div class="seg" id="p-seg"><button data-k="expense">支出</button><button data-k="income">収入</button></div></div>
+    <div class="field"><label>区分</label><div class="seg" id="p-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>頻度</label><div class="seg" id="p-freq"><button data-f="once">単発</button><button data-f="monthly">毎月</button></div></div>
     <div class="field" id="p-date-field"><label>日付</label><input id="p-date" type="date" value="${p.date||today()}"></div>
     <div class="field" id="p-day-field" style="display:none;"><label>毎月の日にち（1〜28）</label><input id="p-day" type="number" min="1" max="28" value="${p.day||25}"></div>
@@ -977,8 +1020,9 @@ function openPlanItem(kind2,id){
     <div class="btns"><button class="btn primary" onclick="savePlanItem('${kind2||""}','${id||""}')">保存</button></div>
     ${isEdit?`<button class="del" onclick="delPlanItem('${kind2}','${id}')">この予定を削除</button>`:""}`;
   document.querySelectorAll("#p-seg button").forEach(b=>b.onclick=()=>{planKind=b.dataset.k; pSeg(); fillPCats(document.getElementById("p-cat").value);});
+  document.querySelectorAll("#p-scope button").forEach(b=>b.onclick=()=>{planScope=b.dataset.s; syncScopeSeg("p-scope",planScope);});
   document.querySelectorAll("#p-freq button").forEach(b=>b.onclick=()=>{planFreq=b.dataset.f; pFreq();});
-  pSeg(); pFreq(); fillPCats(p.category);
+  pSeg(); syncScopeSeg("p-scope",planScope); pFreq(); fillPCats(p.category);
   ov.classList.add("show");
   setTimeout(()=>document.getElementById("p-label").focus(),100);
 }
@@ -997,7 +1041,7 @@ function savePlanItem(kind2,id){
   if(amount<=0){alert("金額を入力してください。");return;}
   if(planFreq==="once"){
     const date=document.getElementById("p-date").value||today();
-    const obj={label,kind:planKind,category,amount,date};
+    const obj={label,kind:planKind,scope:planScope,category,amount,date};
     if(kind2==="scheduled"&&id){ Object.assign(db.scheduled.find(x=>x.id===id),obj); }
     else{
       if(kind2==="recurring"&&id){ db.recurring=db.recurring.filter(x=>x.id!==id); }
@@ -1005,7 +1049,7 @@ function savePlanItem(kind2,id){
     }
   }else{
     const day=Math.min(28,Math.max(1,+document.getElementById("p-day").value||25));
-    const obj={label,kind:planKind,category,amount,day};
+    const obj={label,kind:planKind,scope:planScope,category,amount,day};
     if(kind2==="recurring"&&id){ Object.assign(db.recurring.find(x=>x.id===id),obj); }
     else{
       if(kind2==="scheduled"&&id){ db.scheduled=db.scheduled.filter(x=>x.id!==id); }
@@ -1036,33 +1080,35 @@ function renderQuick(){
 }
 function quickAdd(id){
   const q=db.quickItems.find(x=>x.id===id); if(!q) return;
-  db.transactions.push({id:uid(),date:today(),amount:q.amount,kind:q.kind,category:q.category,memo:q.label});
+  db.transactions.push({id:uid(),date:today(),amount:q.amount,kind:q.kind,category:q.category,memo:q.label,scope:scopeOf(q)});
   curMonth=today().slice(0,7);
   save(); toast(q.label+" を記録しました");
 }
-let qKind="expense";
+let qKind="expense", qScope="personal";
 function openQuickManager(){
   sheet.innerHTML=`<h3>よく使う項目</h3>
     <div class="card" style="margin-bottom:12px;">${
       db.quickItems.length? db.quickItems.map(q=>`<div class="row" onclick="openQuickItem('${q.id}')">
-        <div class="main"><span class="name">${esc(q.label)}</span><span class="sub">${q.category}</span></div>
+        <div class="main"><span class="name">${esc(q.label)}<span class="tag ${scopeOf(q)}">${scopeName(scopeOf(q))}</span></span><span class="sub">${q.category}</span></div>
         <span class="amt ${q.kind==='income'?'pos':'neg'}">${q.kind==='income'?'+':'−'}${yen(q.amount)}</span></div>`).join("")
         : '<p class="empty">まだありません。</p>'}</div>
     <div class="btns"><button class="btn primary" onclick="openQuickItem()">＋ 新規追加</button></div>`;
   ov.classList.add("show");
 }
 function openQuickItem(id){
-  const q=id?db.quickItems.find(x=>x.id===id):{label:"",kind:"expense",category:"食費",amount:""};
-  qKind=q.kind;
+  const q=id?db.quickItems.find(x=>x.id===id):{label:"",kind:"expense",category:"食費",amount:"",scope:"personal"};
+  qKind=q.kind; qScope=scopeOf(q);
   sheet.innerHTML=`<h3>${id?"項目を編集":"項目を追加"}</h3>
     <div class="field"><label>名前</label><input id="q-label" value="${esc(q.label)}" placeholder="例：コンビニ"></div>
     <div class="field"><label>種別</label><div class="seg" id="q-seg"><button data-k="expense">支出</button><button data-k="income">収入</button></div></div>
+    <div class="field"><label>区分</label><div class="seg" id="q-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>カテゴリ</label><select id="q-cat"></select></div>
     <div class="field"><label>金額（円）</label><input id="q-amt" type="number" inputmode="numeric" value="${q.amount}" placeholder="0"></div>
     <div class="btns"><button class="btn primary" onclick="saveQuickItem('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delQuickItem('${id}')">この項目を削除</button>`:""}`;
   document.querySelectorAll("#q-seg button").forEach(b=>b.onclick=()=>{qKind=b.dataset.k; qSeg(); fillQCats(document.getElementById("q-cat").value);});
-  qSeg(); fillQCats(q.category);
+  document.querySelectorAll("#q-scope button").forEach(b=>b.onclick=()=>{qScope=b.dataset.s; syncScopeSeg("q-scope",qScope);});
+  qSeg(); syncScopeSeg("q-scope",qScope); fillQCats(q.category);
   ov.classList.add("show");
   setTimeout(()=>document.getElementById("q-label").focus(),100);
 }
@@ -1073,7 +1119,7 @@ function saveQuickItem(id){
   const amount=+document.getElementById("q-amt").value||0;
   if(!label){alert("名前を入力してください。");return;}
   if(amount<=0){alert("金額を入力してください。");return;}
-  const obj={label,kind:qKind,category:document.getElementById("q-cat").value,amount};
+  const obj={label,kind:qKind,scope:qScope,category:document.getElementById("q-cat").value,amount};
   if(id){Object.assign(db.quickItems.find(x=>x.id===id),obj);}else{db.quickItems.push({id:uid(),...obj});}
   closeSheet(); save();
 }
