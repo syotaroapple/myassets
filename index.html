@@ -119,7 +119,8 @@
   /* modal */
   .overlay{position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.4); display:none; align-items:flex-end; justify-content:center;}
   .overlay.show{display:flex;}
-  .sheet{background:var(--surface); width:100%; max-width:560px; border-radius:18px 18px 0 0; padding:18px 18px calc(18px + var(--safe-bot)); animation:up .22s ease;}
+  .sheet{position:relative; background:var(--surface); width:100%; max-width:560px; border-radius:18px 18px 0 0; padding:18px 18px calc(18px + var(--safe-bot)); animation:up .22s ease; max-height:92vh; overflow-y:auto;}
+  .sheet-close{position:sticky; top:0; margin:-6px -6px -30px auto; width:32px; height:32px; border-radius:50%; border:none; background:var(--bg); color:var(--muted); font-size:15px; line-height:1; display:flex; align-items:center; justify-content:center; z-index:2;}
   @keyframes up{from{transform:translateY(40px); opacity:.6;} to{transform:none; opacity:1;}}
   .sheet h3{margin:2px 0 14px; font-size:18px; font-weight:600; text-align:center;}
   .field{margin-bottom:12px;}
@@ -307,7 +308,7 @@
 </nav>
 
 <button id="fab" onclick="openTxn()" aria-label="収支を記録">＋</button>
-<div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+<div class="overlay" id="overlay"><div class="sheet"><button class="sheet-close" onclick="closeSheet()" aria-label="閉じる">✕</button><div id="sheet"></div></div></div>
 <div id="toast"></div>
 
 <script>
@@ -532,7 +533,7 @@ function renderBudget(){
   el.innerHTML = tx.length ? tx.map(t=>`
     <div class="row" onclick="openTxn('${t.id}')">
       <div class="main"><span class="name">${esc(t.category)}${t.memo?' ・ '+esc(t.memo):''}<span class="tag ${scopeOf(t)}">${scopeName(scopeOf(t))}</span></span>
-      <span class="sub">${t.date.slice(5).replace('-','/')}</span></div>
+      <span class="sub">${t.date.slice(5).replace('-','/')}${(a=>a?' ・ '+esc(a.name):'')(db.accounts.find(a=>a.id===t.accountId))}</span></div>
       <span class="amt ${t.kind==='income'?'pos':'neg'}">${t.kind==='income'?'+':'−'}${yen(t.amount)}</span>
     </div>`).join("") : '<p class="empty">この月の記録はまだありません。</p>';
   renderCalendar();
@@ -640,6 +641,16 @@ function openDay(ds){
 /* ---------- modals ---------- */
 const ov=document.getElementById("overlay"), sheet=document.getElementById("sheet");
 function closeSheet(){ov.classList.remove("show"); sheet.innerHTML="";}
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&ov.classList.contains("show"))closeSheet();});
+function accountOptions(sel){
+  return `<option value="">なし（残高に反映しない）</option>`+db.accounts.map(a=>`<option value="${a.id}" ${a.id===sel?"selected":""}>${esc(a.name)}</option>`).join("");
+}
+function applyToAccount(t,dir){
+  if(!t||!t.accountId) return;
+  const a=db.accounts.find(x=>x.id===t.accountId); if(!a) return;
+  const delta=t.kind==="income"?(+t.amount||0):-(+t.amount||0);
+  a.balance=(+a.balance||0)+dir*delta;
+}
 ov.addEventListener("click",e=>{if(e.target===ov)closeSheet();});
 
 function openAccount(id){
@@ -684,6 +695,7 @@ function openTxn(id,defDate){
     <div class="field"><label>日付</label><input id="f-date" type="date" value="${t.date}"></div>
     <div class="field"><label>金額（円）</label><input id="f-amt" type="number" inputmode="numeric" value="${t.amount}" placeholder="0"></div>
     <div class="field"><label>カテゴリ</label><select id="f-cat"></select></div>
+    <div class="field"><label>反映先の口座（任意）</label><select id="f-acct">${accountOptions(t.accountId||"")}</select></div>
     <div class="field"><label>メモ（任意）</label><input id="f-memo" value="${esc(t.memo||"")}"></div>
     <div class="btns"><button class="btn primary" onclick="saveTxn('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delTxn('${id}')">この記録を削除</button>`:""}`;
@@ -702,15 +714,17 @@ function saveTxn(id){
   const amt=+document.getElementById("f-amt").value||0;
   if(amt<=0){alert("金額を入力してください。");return;}
   const obj={date:document.getElementById("f-date").value||today(), amount:amt, kind:txnKind, scope:txnScope,
-    category:document.getElementById("f-cat").value, memo:document.getElementById("f-memo").value.trim()};
-  if(id){const t=db.transactions.find(x=>x.id===id); Object.assign(t,obj);}
-  else{db.transactions.push({id:uid(),...obj});}
+    category:document.getElementById("f-cat").value, memo:document.getElementById("f-memo").value.trim(),
+    accountId:document.getElementById("f-acct").value||""};
+  if(id){const t=db.transactions.find(x=>x.id===id); applyToAccount(t,-1); Object.assign(t,obj); applyToAccount(t,+1);}
+  else{const t={id:uid(),...obj}; db.transactions.push(t); applyToAccount(t,+1);}
   curMonth=obj.date.slice(0,7);
   closeSheet(); save();
 }
 function delTxn(id){
   if(!confirm("この記録を削除しますか？")) return;
-  db.transactions=db.transactions.filter(t=>t.id!==id);
+  const t=db.transactions.find(x=>x.id===id); if(t) applyToAccount(t,-1);
+  db.transactions=db.transactions.filter(x=>x.id!==id);
   closeSheet(); save();
 }
 
@@ -1013,6 +1027,7 @@ function openPlanConfirm(kind2,id){
     <div class="field"><label>日付</label><input id="pc-date" type="date" value="${p.date}"></div>
     <div class="field"><label>金額（円）</label><input id="pc-amt" type="number" inputmode="numeric" value="${p.amount}"></div>
     <div class="field"><label>カテゴリ</label><select id="pc-cat">${(p.kind==="income"?INC_CATS:EXP_CATS).map(c=>`<option ${c===p.category?"selected":""}>${c}</option>`).join("")}</select></div>
+    <div class="field"><label>反映先の口座（任意）</label><select id="pc-acct">${accountOptions(p.accountId||"")}</select></div>
     <div class="btns"><button class="btn primary" onclick="savePlanConfirm()">記録する（実績にする）</button></div>
     ${kind2==="recurring"?'<button class="del" style="color:var(--blue);" onclick="skipPlanOccurrence()">この回は記録しない（スキップ）</button>':""}
     <button class="del" onclick="openPlanItem('${kind2}','${id}')">この予定を編集・削除</button>`;
@@ -1026,7 +1041,8 @@ function savePlanConfirm(){
   const amount=+document.getElementById("pc-amt").value||0;
   const category=document.getElementById("pc-cat").value;
   if(amount<=0){alert("金額を入力してください。");return;}
-  db.transactions.push({id:uid(),date,amount,kind:planConfirmTxnKind,category,memo:label,scope:planConfirmScope});
+  const nt={id:uid(),date,amount,kind:planConfirmTxnKind,category,memo:label,scope:planConfirmScope,accountId:document.getElementById("pc-acct").value||""};
+  db.transactions.push(nt); applyToAccount(nt,+1);
   if(planConfirmKind==="scheduled"){
     db.scheduled=db.scheduled.filter(x=>x.id!==planConfirmId);
   }else{
@@ -1072,6 +1088,7 @@ function openPlanItem(kind2,id){
     <div class="field" id="p-day-field" style="display:none;"><label>毎月の日にち（1〜28）</label><input id="p-day" type="number" min="1" max="28" value="${p.day||25}"></div>
     <div class="field"><label>カテゴリ</label><select id="p-cat"></select></div>
     <div class="field"><label>金額（円）</label><input id="p-amt" type="number" inputmode="numeric" value="${p.amount}" placeholder="0"></div>
+    <div class="field"><label>反映先の口座（任意）</label><select id="p-acct">${accountOptions(p.accountId||"")}</select></div>
     <div class="btns"><button class="btn primary" onclick="savePlanItem('${kind2||""}','${id||""}')">保存</button></div>
     ${isEdit?`<button class="del" onclick="delPlanItem('${kind2}','${id}')">この予定を削除</button>`:""}`;
   document.querySelectorAll("#p-seg button").forEach(b=>b.onclick=()=>{planKind=b.dataset.k; pSeg(); fillPCats(document.getElementById("p-cat").value);});
@@ -1096,7 +1113,7 @@ function savePlanItem(kind2,id){
   if(amount<=0){alert("金額を入力してください。");return;}
   if(planFreq==="once"){
     const date=document.getElementById("p-date").value||today();
-    const obj={label,kind:planKind,scope:planScope,category,amount,date};
+    const obj={label,kind:planKind,scope:planScope,category,amount,date,accountId:document.getElementById("p-acct").value||""};
     if(kind2==="scheduled"&&id){ Object.assign(db.scheduled.find(x=>x.id===id),obj); }
     else{
       if(kind2==="recurring"&&id){ db.recurring=db.recurring.filter(x=>x.id!==id); }
@@ -1104,7 +1121,7 @@ function savePlanItem(kind2,id){
     }
   }else{
     const day=Math.min(28,Math.max(1,+document.getElementById("p-day").value||25));
-    const obj={label,kind:planKind,scope:planScope,category,amount,day};
+    const obj={label,kind:planKind,scope:planScope,category,amount,day,accountId:document.getElementById("p-acct").value||""};
     if(kind2==="recurring"&&id){ Object.assign(db.recurring.find(x=>x.id===id),obj); }
     else{
       if(kind2==="scheduled"&&id){ db.scheduled=db.scheduled.filter(x=>x.id!==id); }
@@ -1135,7 +1152,8 @@ function renderQuick(){
 }
 function quickAdd(id){
   const q=db.quickItems.find(x=>x.id===id); if(!q) return;
-  db.transactions.push({id:uid(),date:today(),amount:q.amount,kind:q.kind,category:q.category,memo:q.label,scope:scopeOf(q)});
+  const nt={id:uid(),date:today(),amount:q.amount,kind:q.kind,category:q.category,memo:q.label,scope:scopeOf(q),accountId:q.accountId||""};
+  db.transactions.push(nt); applyToAccount(nt,+1);
   curMonth=today().slice(0,7);
   save(); toast(q.label+" を記録しました");
 }
@@ -1159,6 +1177,7 @@ function openQuickItem(id){
     <div class="field"><label>区分</label><div class="seg" id="q-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>カテゴリ</label><select id="q-cat"></select></div>
     <div class="field"><label>金額（円）</label><input id="q-amt" type="number" inputmode="numeric" value="${q.amount}" placeholder="0"></div>
+    <div class="field"><label>反映先の口座（任意）</label><select id="q-acct">${accountOptions(q.accountId||"")}</select></div>
     <div class="btns"><button class="btn primary" onclick="saveQuickItem('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delQuickItem('${id}')">この項目を削除</button>`:""}`;
   document.querySelectorAll("#q-seg button").forEach(b=>b.onclick=()=>{qKind=b.dataset.k; qSeg(); fillQCats(document.getElementById("q-cat").value);});
@@ -1174,7 +1193,7 @@ function saveQuickItem(id){
   const amount=+document.getElementById("q-amt").value||0;
   if(!label){alert("名前を入力してください。");return;}
   if(amount<=0){alert("金額を入力してください。");return;}
-  const obj={label,kind:qKind,scope:qScope,category:document.getElementById("q-cat").value,amount};
+  const obj={label,kind:qKind,scope:qScope,category:document.getElementById("q-cat").value,amount,accountId:document.getElementById("q-acct").value||""};
   if(id){Object.assign(db.quickItems.find(x=>x.id===id),obj);}else{db.quickItems.push({id:uid(),...obj});}
   closeSheet(); save();
 }
@@ -1250,7 +1269,7 @@ function loanPayoff(l){
 function syncLoanRecurring(loan){
   let r=db.recurring.find(x=>x.loanId===loan.id);
   if(loan.monthlyPayment>0){
-    const obj={label:loan.name+" 返済", kind:"expense", category:"返済", scope:scopeOf(loan), amount:loan.monthlyPayment, day:loan.dueDay||27, loanId:loan.id};
+    const obj={label:loan.name+" 返済", kind:"expense", category:"返済", scope:scopeOf(loan), amount:loan.monthlyPayment, day:loan.dueDay||27, loanId:loan.id, accountId:loan.accountId||""};
     if(r){ Object.assign(r,obj); if(!Array.isArray(r.confirmed))r.confirmed=[]; }
     else{ db.recurring.push({id:uid(), confirmed:[], ...obj}); }
   }else if(r){
@@ -1295,6 +1314,7 @@ function openLoan(id){
     <div class="field"><label>金利（年率％・任意）</label><input id="l-rate" type="number" inputmode="decimal" value="${l.rate}" placeholder="15"></div>
     <div class="field"><label>毎月の返済額（円・任意）</label><input id="l-pay" type="number" inputmode="numeric" value="${l.monthlyPayment}" placeholder="0"></div>
     <div class="field"><label>返済日（毎月・1〜28）</label><input id="l-day" type="number" min="1" max="28" value="${l.dueDay||27}"></div>
+    <div class="field"><label>引落口座（任意）</label><select id="l-acct">${accountOptions(l.accountId||"")}</select></div>
     <div class="field"><label>「使える金額」の計算</label><div class="seg" id="l-spendable"><button data-v="1">含める</button><button data-v="0">含めない</button></div>
       <p style="font-size:12px; color:var(--muted); margin:6px 0 0;">「含めない」にすると、この返済額は1日あたりの使える金額から差し引かれなくなります（負債・純資産の計算には引き続き反映されます）。</p></div>
     <div class="btns"><button class="btn primary" onclick="saveLoan('${id||""}')">保存</button></div>
@@ -1309,7 +1329,7 @@ function syncSpendableSeg(){document.querySelectorAll("#l-spendable button").for
 function saveLoan(id){
   const name=document.getElementById("l-name").value.trim();
   if(!name){alert("名前を入力してください。");return;}
-  const obj={name, scope:loanScope, excludeFromSpendable:!loanSpendable, balance:+document.getElementById("l-bal").value||0,
+  const obj={name, scope:loanScope, excludeFromSpendable:!loanSpendable, accountId:document.getElementById("l-acct").value||"", balance:+document.getElementById("l-bal").value||0,
     rate:+document.getElementById("l-rate").value||0,
     monthlyPayment:+document.getElementById("l-pay").value||0,
     dueDay:Math.min(28,Math.max(1,+document.getElementById("l-day").value||27))};
