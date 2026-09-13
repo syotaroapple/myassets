@@ -939,6 +939,7 @@ function pendingByKind(kind,target){
   (db.scheduled||[]).forEach(s=>{ if(s.kind===kind && s.date<=target) total+=(+s.amount||0); });
   (db.recurring||[]).forEach(r=>{
     if(r.kind!==kind) return;
+    if(r.loanId){ const loan=(db.loans||[]).find(l=>l.id===r.loanId); if(loan&&loan.excludeFromSpendable) return; }
     let d=new Date(); d.setDate(1); d.setHours(0,0,0,0);
     for(let i=0;i<36;i++){
       const y=d.getFullYear(), m=d.getMonth()+1;
@@ -1272,6 +1273,7 @@ function renderLoans(){
         <span style="font-size:18px; font-weight:600; color:var(--red);">${yen(l.balance)}</span>
       </div>
       <p style="font-size:12px; color:var(--muted); margin:4px 0 0;">${l.monthlyPayment?`月${yen(l.monthlyPayment)}返済（毎月${l.dueDay||27}日）・ ${payoffTxt}`:payoffTxt}</p>
+      ${l.excludeFromSpendable?'<p style="font-size:11px; color:var(--muted); margin:4px 0 0;">「使える金額」には含めていません</p>':""}
       <div class="btns" style="margin-top:10px;"><button class="btn" onclick="openLoan('${l.id}')">編集</button>${l.monthlyPayment?`<button class="btn primary" onclick="quickRepay('${l.id}')">返済を記録</button>`:""}</div>
     </div>`;
   }).join("");
@@ -1282,9 +1284,10 @@ function quickRepay(loanId){
   openPlanConfirm("recurring", r.id);
 }
 let loanScope="personal";
+let loanSpendable=true;
 function openLoan(id){
-  const l=id?db.loans.find(x=>x.id===id):{name:"",balance:"",rate:15,monthlyPayment:"",dueDay:27,scope:"personal"};
-  loanScope=scopeOf(l);
+  const l=id?db.loans.find(x=>x.id===id):{name:"",balance:"",rate:15,monthlyPayment:"",dueDay:27,scope:"personal",excludeFromSpendable:false};
+  loanScope=scopeOf(l); loanSpendable=!l.excludeFromSpendable;
   sheet.innerHTML=`<h3>${id?"負債を編集":"負債を追加"}</h3>
     <div class="field"><label>名前</label><input id="l-name" value="${esc(l.name)}" placeholder="例：カードローン"></div>
     <div class="field"><label>区分</label><div class="seg" id="l-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
@@ -1292,17 +1295,21 @@ function openLoan(id){
     <div class="field"><label>金利（年率％・任意）</label><input id="l-rate" type="number" inputmode="decimal" value="${l.rate}" placeholder="15"></div>
     <div class="field"><label>毎月の返済額（円・任意）</label><input id="l-pay" type="number" inputmode="numeric" value="${l.monthlyPayment}" placeholder="0"></div>
     <div class="field"><label>返済日（毎月・1〜28）</label><input id="l-day" type="number" min="1" max="28" value="${l.dueDay||27}"></div>
+    <div class="field"><label>「使える金額」の計算</label><div class="seg" id="l-spendable"><button data-v="1">含める</button><button data-v="0">含めない</button></div>
+      <p style="font-size:12px; color:var(--muted); margin:6px 0 0;">「含めない」にすると、この返済額は1日あたりの使える金額から差し引かれなくなります（負債・純資産の計算には引き続き反映されます）。</p></div>
     <div class="btns"><button class="btn primary" onclick="saveLoan('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delLoan('${id}')">この負債を削除</button>`:""}`;
   document.querySelectorAll("#l-scope button").forEach(b=>b.onclick=()=>{loanScope=b.dataset.s; syncScopeSeg("l-scope",loanScope);});
-  syncScopeSeg("l-scope",loanScope);
+  document.querySelectorAll("#l-spendable button").forEach(b=>b.onclick=()=>{loanSpendable=b.dataset.v==="1"; syncSpendableSeg();});
+  syncScopeSeg("l-scope",loanScope); syncSpendableSeg();
   ov.classList.add("show");
   setTimeout(()=>document.getElementById("l-name").focus(),100);
 }
+function syncSpendableSeg(){document.querySelectorAll("#l-spendable button").forEach(b=>b.classList.toggle("on",(b.dataset.v==="1")===loanSpendable));}
 function saveLoan(id){
   const name=document.getElementById("l-name").value.trim();
   if(!name){alert("名前を入力してください。");return;}
-  const obj={name, scope:loanScope, balance:+document.getElementById("l-bal").value||0,
+  const obj={name, scope:loanScope, excludeFromSpendable:!loanSpendable, balance:+document.getElementById("l-bal").value||0,
     rate:+document.getElementById("l-rate").value||0,
     monthlyPayment:+document.getElementById("l-pay").value||0,
     dueDay:Math.min(28,Math.max(1,+document.getElementById("l-day").value||27))};
