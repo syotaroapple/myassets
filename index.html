@@ -314,7 +314,7 @@
 const TYPES=[["bank","銀行"],["stock","証券"],["cash","現金"],["emoney","電子マネー"],["other","その他"]];
 const SCOPES=[["personal","個人"],["family","家族"]];
 const scopeName=s=>(SCOPES.find(x=>x[0]===s)||SCOPES[0])[1];
-const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","返済","その他"];
+const EXP_CATS=["食費","日用品","住居","水道光熱","交通","通信","娯楽","医療","返済","カード","立替","その他"];
 const INC_CATS=["給与","賞与","その他収入"];
 const yen=n=>"¥"+Math.round(n).toLocaleString("ja-JP");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -1249,7 +1249,7 @@ function loanPayoff(l){
 function syncLoanRecurring(loan){
   let r=db.recurring.find(x=>x.loanId===loan.id);
   if(loan.monthlyPayment>0){
-    const obj={label:loan.name+" 返済", kind:"expense", category:"返済", amount:loan.monthlyPayment, day:loan.dueDay||27, loanId:loan.id};
+    const obj={label:loan.name+" 返済", kind:"expense", category:"返済", scope:scopeOf(loan), amount:loan.monthlyPayment, day:loan.dueDay||27, loanId:loan.id};
     if(r){ Object.assign(r,obj); if(!Array.isArray(r.confirmed))r.confirmed=[]; }
     else{ db.recurring.push({id:uid(), confirmed:[], ...obj}); }
   }else if(r){
@@ -1268,7 +1268,7 @@ function renderLoans(){
     else payoffTxt=(p.years>0?`完済まで目安 約${p.years}年${p.remMonths}ヶ月`:`完済まで目安 約${p.remMonths}ヶ月`)+`（利息総額目安 ${yen(p.totalInterest)}）`;
     return `<div class="card pad" style="margin-bottom:10px;">
       <div style="display:flex; justify-content:space-between; align-items:baseline;">
-        <span style="font-size:16px; font-weight:600;">${esc(l.name)}</span>
+        <span style="font-size:16px; font-weight:600;">${esc(l.name)}<span class="tag ${scopeOf(l)}">${scopeName(scopeOf(l))}</span></span>
         <span style="font-size:18px; font-weight:600; color:var(--red);">${yen(l.balance)}</span>
       </div>
       <p style="font-size:12px; color:var(--muted); margin:4px 0 0;">${l.monthlyPayment?`月${yen(l.monthlyPayment)}返済（毎月${l.dueDay||27}日）・ ${payoffTxt}`:payoffTxt}</p>
@@ -1281,23 +1281,28 @@ function quickRepay(loanId){
   if(!r){alert("先に毎月の返済額を設定してください。");return;}
   openPlanConfirm("recurring", r.id);
 }
+let loanScope="personal";
 function openLoan(id){
-  const l=id?db.loans.find(x=>x.id===id):{name:"",balance:"",rate:15,monthlyPayment:"",dueDay:27};
+  const l=id?db.loans.find(x=>x.id===id):{name:"",balance:"",rate:15,monthlyPayment:"",dueDay:27,scope:"personal"};
+  loanScope=scopeOf(l);
   sheet.innerHTML=`<h3>${id?"負債を編集":"負債を追加"}</h3>
     <div class="field"><label>名前</label><input id="l-name" value="${esc(l.name)}" placeholder="例：カードローン"></div>
+    <div class="field"><label>区分</label><div class="seg" id="l-scope"><button data-s="personal">個人</button><button data-s="family">家族</button></div></div>
     <div class="field"><label>残高（円）</label><input id="l-bal" type="number" inputmode="numeric" value="${l.balance}" placeholder="0"></div>
     <div class="field"><label>金利（年率％・任意）</label><input id="l-rate" type="number" inputmode="decimal" value="${l.rate}" placeholder="15"></div>
     <div class="field"><label>毎月の返済額（円・任意）</label><input id="l-pay" type="number" inputmode="numeric" value="${l.monthlyPayment}" placeholder="0"></div>
     <div class="field"><label>返済日（毎月・1〜28）</label><input id="l-day" type="number" min="1" max="28" value="${l.dueDay||27}"></div>
     <div class="btns"><button class="btn primary" onclick="saveLoan('${id||""}')">保存</button></div>
     ${id?`<button class="del" onclick="delLoan('${id}')">この負債を削除</button>`:""}`;
+  document.querySelectorAll("#l-scope button").forEach(b=>b.onclick=()=>{loanScope=b.dataset.s; syncScopeSeg("l-scope",loanScope);});
+  syncScopeSeg("l-scope",loanScope);
   ov.classList.add("show");
   setTimeout(()=>document.getElementById("l-name").focus(),100);
 }
 function saveLoan(id){
   const name=document.getElementById("l-name").value.trim();
   if(!name){alert("名前を入力してください。");return;}
-  const obj={name, balance:+document.getElementById("l-bal").value||0,
+  const obj={name, scope:loanScope, balance:+document.getElementById("l-bal").value||0,
     rate:+document.getElementById("l-rate").value||0,
     monthlyPayment:+document.getElementById("l-pay").value||0,
     dueDay:Math.min(28,Math.max(1,+document.getElementById("l-day").value||27))};
