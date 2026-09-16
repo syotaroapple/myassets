@@ -979,21 +979,18 @@ function spendableInfo(target){
 
 /* ---------- Androidホームウィジェット連携 ----------
    MainActivity.onPause() から evaluateJavascript で呼ばれる。
-   アプリを閉じるタイミングで、今日の支出と1日の目安をスナップショットとして返す。 */
+   アプリを閉じるタイミングで、今日の支出額と1日の目安額（生の数値）を返す。
+   円表記への整形やリング描画はネイティブ側（WalletWidget.kt）で行う。
+   STEPN/衛生管理者ウィジェットと同じ CapacitorStorage/"widget" キーに格納される。 */
 window.__widgetSnapshot=function(){
   try{
     const info=spendableInfo(nextPayday());
     const t=today();
     const spentToday=db.transactions.filter(x=>x.date===t && x.kind==="expense").reduce((s,x)=>s+x.amount,0);
     const target=Math.round(info.perDay);
-    const remaining=target-spentToday;
-    const status = target<=0 ? "給与日までの目安が未設定です"
-      : remaining>=0 ? `目安 ${yen(target)}/日 ・ 残り${yen(remaining)}`
-      : `目安 ${yen(target)}/日 ・ ${yen(-remaining)}オーバー`;
-    const pct = target>0 ? Math.max(0,Math.min(100,Math.round(spentToday/target*100))) : 0;
-    return JSON.stringify({amount:yen(spentToday), status, pct});
+    return JSON.stringify({spent:spentToday, target});
   }catch(e){
-    return JSON.stringify({amount:"¥0", status:"データを取得できませんでした", pct:0});
+    return JSON.stringify({spent:0, target:0});
   }
 };
 
