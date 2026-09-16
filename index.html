@@ -976,6 +976,27 @@ function spendableInfo(target){
   const spendable=Math.max(0, liquid+pendingIncome-pending);
   return {target,remDays,liquid,pending,pendingIncome,spendable,perDay:spendable/remDays};
 }
+
+/* ---------- Androidホームウィジェット連携 ----------
+   MainActivity.onPause() から evaluateJavascript で呼ばれる。
+   アプリを閉じるタイミングで、今日の支出と1日の目安をスナップショットとして返す。 */
+window.__widgetSnapshot=function(){
+  try{
+    const info=spendableInfo(nextPayday());
+    const t=today();
+    const spentToday=db.transactions.filter(x=>x.date===t && x.kind==="expense").reduce((s,x)=>s+x.amount,0);
+    const target=Math.round(info.perDay);
+    const remaining=target-spentToday;
+    const status = target<=0 ? "給与日までの目安が未設定です"
+      : remaining>=0 ? `目安 ${yen(target)}/日 ・ 残り${yen(remaining)}`
+      : `目安 ${yen(target)}/日 ・ ${yen(-remaining)}オーバー`;
+    const pct = target>0 ? Math.max(0,Math.min(100,Math.round(spentToday/target*100))) : 0;
+    return JSON.stringify({amount:yen(spentToday), status, pct});
+  }catch(e){
+    return JSON.stringify({amount:"¥0", status:"データを取得できませんでした", pct:0});
+  }
+};
+
 function renderSpendable(){
   const el=document.getElementById("d-spend-until"); if(!el) return;
   const target=spendTarget();
