@@ -994,9 +994,9 @@ window.__widgetSnapshot=function(){
     const t=today();
     const spentToday=db.transactions.filter(x=>x.date===t && x.kind==="expense").reduce((s,x)=>s+x.amount,0);
     const target=Math.round(info.perDay);
-    return JSON.stringify({spent:spentToday, target});
+    return JSON.stringify({spent:spentToday, target, date:t});
   }catch(e){
-    return JSON.stringify({spent:0, target:0});
+    return JSON.stringify({spent:0, target:0, date:today()});
   }
 };
 
