@@ -203,6 +203,12 @@
     <div class="qhead"><span class="t">負債（カードローンなど）</span><button class="e" onclick="openLoan()">＋ 追加</button></div>
     <div id="a-loans"></div>
     <p class="empty" style="padding:10px 16px;">負債の残高は総資産には含めず「純資産」として別に表示します。毎月の返済額を設定すると、「使える金額」や「今後の予定」に反映されます。</p>
+
+    <div class="qhead"><span class="t">引き落とし前の振込確認</span></div>
+    <div class="card pad" style="margin-bottom:10px;">
+      <p style="font-size:13px; color:var(--muted); margin:0 0 10px;">カード・保育園料・住宅ローンの引き落とし前に、夫婦それぞれがいくら振り込めばよいかを計算します（入力内容は保存されません）。</p>
+      <div class="btns"><button class="btn primary" onclick="openDeduction()">計算する</button></div>
+    </div>
   </section>
 
   <!-- BUDGET -->
@@ -1320,6 +1326,69 @@ function quickRepay(loanId){
   if(!r){alert("先に毎月の返済額を設定してください。");return;}
   openPlanConfirm("recurring", r.id);
 }
+/* ---------- 引き落とし前の振込確認（計算のみ・保存なし） ---------- */
+const DEDUCTION_LOAN_DEFAULT=148498;
+const DEDUCTION_FIELDS=[
+  ["husband_advance","夫の立替金","0"],
+  ["wife_advance","妻の立替金","0"],
+  ["card_main","クレカUFJ（メイン）の引き落とし額",""],
+  ["card_ok","クレカUFJ（OKストア）の引き落とし額",""],
+  ["nursery","ルクミー保育園料の引き落とし額",""],
+  ["ufj_balance","UFJ口座の現在残高",""],
+  ["seiwa_balance","青和口座の現在残高",""],
+  ["loan","住宅ローン引き落とし額",String(DEDUCTION_LOAN_DEFAULT)]
+];
+function computeTransferPlan(v){
+  const ufjDeduct=v.card_main+v.card_ok+v.nursery;
+  const ufjNeeded=Math.max(0,ufjDeduct-v.ufj_balance);
+  const seiwaNeeded=Math.max(0,v.loan-v.seiwa_balance);
+  const total=ufjNeeded+seiwaNeeded;
+  const diff=v.husband_advance-v.wife_advance;
+  const H=Math.floor((total-diff)/2);
+  const W=total-H;
+  let plan, note="";
+  if(H<0){
+    plan=[["妻","UFJ",ufjNeeded],["妻","青和",seiwaNeeded]];
+    note=`夫の立替超過：妻→夫 ${yen(-H)} 別途精算`;
+  }else if(H<=seiwaNeeded){
+    plan=[["妻","UFJ",ufjNeeded],["妻","青和",seiwaNeeded-H],["夫","青和",H]];
+  }else if(H<=ufjNeeded){
+    plan=[["妻","UFJ",ufjNeeded-H],["妻","青和",seiwaNeeded],["夫","UFJ",H]];
+  }else{
+    plan=[["夫","UFJ",ufjNeeded],["夫","青和",H-ufjNeeded],["妻","青和",W]];
+  }
+  plan=plan.filter(p=>p[2]>0);
+  const sum=who=>plan.filter(p=>p[0]===who).reduce((s,p)=>s+p[2],0);
+  return {ufjDeduct,ufjNeeded,seiwaNeeded,total,plan,note,hTotal:sum("夫"),wTotal:sum("妻")};
+}
+function openDeduction(){
+  sheet.innerHTML=`<h3>引き落とし前の振込確認</h3>
+    ${DEDUCTION_FIELDS.map(f=>`<div class="field"><label>${f[1]}（円）</label><input id="dd-${f[0]}" type="number" inputmode="numeric" value="${f[2]}" placeholder="0" oninput="renderDeduction()"></div>`).join("")}
+    <div id="dd-result"></div>`;
+  ov.classList.add("show");
+  renderDeduction();
+  setTimeout(()=>document.getElementById("dd-husband_advance").focus(),100);
+}
+function renderDeduction(){
+  const el=document.getElementById("dd-result"); if(!el) return;
+  const v={}; DEDUCTION_FIELDS.forEach(f=>{v[f[0]]=Math.max(0,+document.getElementById("dd-"+f[0]).value||0);});
+  const r=computeTransferPlan(v);
+  const row=(a,b)=>`<div style="display:flex; justify-content:space-between; padding:3px 0;"><span>${a}</span><span>${b}</span></div>`;
+  el.innerHTML=`<div class="card pad" style="margin-top:6px;">
+    <p style="font-size:13px; font-weight:600; margin:0 0 4px;">UFJ口座</p>
+    ${row("引き落とし計",yen(r.ufjDeduct))}${row("現在残高",yen(v.ufj_balance))}${row("振込必要",`<b>${yen(r.ufjNeeded)}</b>`)}
+    <p style="font-size:13px; font-weight:600; margin:12px 0 4px;">青和口座</p>
+    ${row("住宅ローン",yen(v.loan))}${row("現在残高",yen(v.seiwa_balance))}${row("振込必要",`<b>${yen(r.seiwaNeeded)}</b>`)}
+    <p style="font-size:13px; font-weight:600; margin:12px 0 4px;">振込プラン（${r.plan.length}回）</p>
+    ${r.plan.length?r.plan.map(p=>row(`${p[0]} → ${p[1]}`,`<b>${yen(p[2])}</b>`)).join(""):'<p class="empty" style="padding:4px 0;">振込は不要です。</p>'}
+    ${r.note?`<p style="font-size:12px; color:var(--red); margin:6px 0 0;">⚠️ ${r.note}</p>`:""}
+    <div style="border-top:0.5px solid var(--line); margin-top:8px; padding-top:6px;">
+      ${row("夫 合計",`<b>${yen(r.hTotal)}</b>`)}${row("妻 合計",`<b>${yen(r.wTotal)}</b>`)}
+    </div>
+    ${(v.husband_advance||v.wife_advance)?`<p style="font-size:11px; color:var(--muted); margin:6px 0 0;">※立替反映済（夫${yen(v.husband_advance)} / 妻${yen(v.wife_advance)}）</p>`:""}
+  </div>`;
+}
+
 let loanScope="personal";
 let loanSpendable=true;
 function openLoan(id){
