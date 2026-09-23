@@ -298,6 +298,12 @@
     </div>
     <input type="file" id="importFile" accept="application/json,.json" style="display:none" onchange="importData(event)">
 
+    <h2>予定の一括登録（今回限り）</h2>
+    <div class="card pad">
+      <p style="font-size:14px; margin:0;">バイクレンタル・児童手当・家賃・交通費・NISA・ペイディ・携帯代・Apple One・Kindle・STEPN・Claude Proの毎月の予定をまとめて登録します。</p>
+    </div>
+    <div class="btns"><button class="btn" id="seedBtn" onclick="seedRecurringOnce()">まとめて登録する</button></div>
+
     <h2>登録状況</h2>
     <div class="card pad"><div id="s-stats" style="font-size:14px;"></div></div>
 
@@ -1438,6 +1444,8 @@ function renderSettings(){
   document.getElementById("s-stats").innerHTML=
     `口座：${db.accounts.length} 件<br>負債：${db.loans.length} 件<br>残高記録：${db.snapshots.length} 件<br>収支記録：${db.transactions.length} 件`;
   const pi=document.getElementById("payday-input"); if(pi) pi.value=db.payday;
+  const sb=document.getElementById("seedBtn");
+  if(sb&&localStorage.getItem("seedRecurring20260924")){ sb.disabled=true; sb.textContent="登録済み"; }
   const ci=document.getElementById("calbudget-info");
   if(ci){const list=db.calBudgets||[];
     ci.innerHTML= list.length
@@ -1448,6 +1456,30 @@ function renderSettings(){
 function clearCalBudget(){
   if(!confirm("カレンダーの予算をすべてクリアして、各日の支出表示に戻しますか？")) return;
   db.calBudgets=[]; save();
+}
+function seedRecurringOnce(){
+  if(localStorage.getItem("seedRecurring20260924")){
+    if(!confirm("これは以前に一度実行済みです。もう一度追加すると二重登録になります。それでも実行しますか？")) return;
+  }
+  const items=[
+    {label:"バイクレンタル", kind:"income", category:"その他収入", amount:10000, day:1},
+    {label:"児童手当", kind:"income", category:"その他収入", amount:20000, day:10},
+    {label:"家賃", kind:"expense", category:"住居", amount:150000, day:28},
+    {label:"交通費", kind:"expense", category:"交通", amount:30000, day:1},
+    {label:"NISA", kind:"expense", category:"その他", amount:30000, day:28},
+    {label:"ペイディ", kind:"expense", category:"カード", amount:13514, day:28},
+    {label:"携帯代(povo)", kind:"expense", category:"通信", amount:3270, day:28},
+    {label:"Apple One", kind:"expense", category:"娯楽", amount:1350, day:25},
+    {label:"Kindle", kind:"expense", category:"娯楽", amount:980, day:25},
+    {label:"STEPN", kind:"expense", category:"娯楽", amount:2700, day:25},
+    {label:"Claude Pro", kind:"expense", category:"その他", amount:3390, day:5},
+  ];
+  items.forEach(it=>db.recurring.push({id:uid(), confirmed:[], scope:"personal", accountId:"", ...it}));
+  save();
+  localStorage.setItem("seedRecurring20260924","done");
+  alert(items.length+"件の毎月の予定を登録しました。ホームの「今後の予定」や家計簿タブから確認できます。");
+  document.getElementById("seedBtn").disabled=true;
+  document.getElementById("seedBtn").textContent="登録済み";
 }
 function exportData(){
   const blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"});
