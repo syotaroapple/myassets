@@ -189,6 +189,15 @@
 
   <!-- ASSETS -->
   <section id="v-assets" class="view">
+    <h2>銀行・カード（Zaim自動取得）</h2>
+    <div class="card pad">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;">
+        <span id="z-total" style="font-size:24px; font-weight:600;">—</span>
+        <button class="btn" style="padding:6px 12px; font-size:13px;" onclick="refreshZaimTotal(true)">今すぐ更新</button>
+      </div>
+      <p id="z-updated" style="font-size:12px; color:var(--muted); margin:6px 0 0;"></p>
+    </div>
+
     <h2>口座一覧</h2>
     <div class="card" id="a-list"></div>
     <div class="btns">
@@ -367,8 +376,32 @@ function show(v){
   window.scrollTo(0,0);
 }
 
+/* ---------- Zaim連携（銀行・カード口座の自動取得） ---------- */
+const ZAIM_API_URL="https://daily-pilot-webhook.onrender.com/zaim-total";
+const ZAIM_API_KEY="7Rk9x_SCXFQJfdnzYkDa2xAUc1aYY2qAhQvh89vgo-k";
+let zaimCache=JSON.parse(localStorage.getItem("zaimCache")||"null");
+function zaimTotal(){return zaimCache?zaimCache.total:0;}
+function renderZaim(){
+  const elT=document.getElementById("z-total"), elU=document.getElementById("z-updated");
+  if(!elT) return;
+  elT.textContent=zaimCache?yen(zaimCache.total):"—";
+  elU.textContent=zaimCache?("Zaim更新: "+zaimCache.updatedAt.replace("T"," ").slice(0,16)):"まだ取得していません";
+}
+async function refreshZaimTotal(manual){
+  try{
+    const res=await fetch(ZAIM_API_URL,{headers:{"X-API-Key":ZAIM_API_KEY}});
+    if(!res.ok) throw new Error("http "+res.status);
+    const data=await res.json();
+    zaimCache={total:data.total, updatedAt:data.updatedAt};
+    localStorage.setItem("zaimCache", JSON.stringify(zaimCache));
+    renderZaim(); renderDash(); renderIdealSavings();
+  }catch(e){
+    if(manual) alert("Zaimの最新値を取得できませんでした。通信環境を確認してください。");
+  }
+}
+
 /* ---------- dashboard ---------- */
-function totalAssets(){return db.accounts.reduce((s,a)=>s+(+a.balance||0),0);}
+function totalAssets(){return db.accounts.reduce((s,a)=>s+(+a.balance||0),0)+zaimTotal();}
 function totalLiabilities(){return (db.loans||[]).reduce((s,l)=>s+(+l.balance||0),0);}
 function netWorth(){return totalAssets()-totalLiabilities();}
 function monthTxns(m){return db.transactions.filter(t=>t.date.slice(0,7)===m);}
@@ -1401,7 +1434,29 @@ function renderDeduction(){
       ${row("夫 合計",`<b>${yen(r.hTotal)}</b>`)}${row("妻 合計",`<b>${yen(r.wTotal)}</b>`)}
     </div>
     ${(v.husband_advance||v.wife_advance)?`<p style="font-size:11px; color:var(--muted); margin:6px 0 0;">※立替反映済（夫${yen(v.husband_advance)} / 妻${yen(v.wife_advance)}）</p>`:""}
-  </div>`;
+  </div>
+  <button class="btn" style="width:100%; margin-top:8px;" onclick="shareDeduction()">LINEで共有</button>`;
+  el._lastResult=r; el._lastValues=v;
+}
+function buildDeductionShareText(r,v){
+  const lines=["【引き落とし前の振込確認】"];
+  lines.push(`UFJ 振込必要: ${yen(r.ufjNeeded)}（引き落とし計${yen(r.ufjDeduct)} / 残高${yen(v.ufj_balance)}）`);
+  lines.push(`青和 振込必要: ${yen(r.seiwaNeeded)}（住宅ローン${yen(v.loan)} / 残高${yen(v.seiwa_balance)}）`);
+  lines.push("―振込プラン―");
+  if(r.plan.length) r.plan.forEach(p=>lines.push(`${p[0]} → ${p[1]}: ${yen(p[2])}`));
+  else lines.push("振込は不要です。");
+  if(r.note) lines.push(`⚠️ ${r.note}`);
+  lines.push(`夫 合計: ${yen(r.hTotal)} / 妻 合計: ${yen(r.wTotal)}`);
+  return lines.join("\n");
+}
+async function shareDeduction(){
+  const el=document.getElementById("dd-result"); if(!el||!el._lastResult) return;
+  const text=buildDeductionShareText(el._lastResult,el._lastValues);
+  if(navigator.share){
+    try{ await navigator.share({text}); return; }catch(e){ if(e.name==="AbortError") return; }
+  }
+  try{ await navigator.clipboard.writeText(text); toast("コピーしました。LINEに貼り付けてください"); }
+  catch(e){ alert(text); }
 }
 
 let loanScope="personal";
@@ -1545,8 +1600,9 @@ document.querySelectorAll("#spend-seg button").forEach(b=>{b.onclick=()=>setSpen
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function renderAll(){renderDash(); renderAssets(); renderCharges(); renderLoans(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
+function renderAll(){renderDash(); renderAssets(); renderZaim(); renderCharges(); renderLoans(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
 renderAll();
+refreshZaimTotal();
 </script>
 </body>
 </html>
