@@ -413,19 +413,19 @@ async function refreshZaimTotal(manual){
 
 /* ---------- Zaim取引明細の自動取り込み ---------- */
 const ZAIM_TXN_API_URL="https://daily-pilot-webhook.onrender.com/zaim-transactions";
-const ZAIM_TXN_API_KEY=""; // TODO: DAILY PILOTからAPI実装完了の返信が来たらトークンを設定する
+const ZAIM_TXN_API_KEY=ZAIM_API_KEY; // /zaim-totalと共通のトークン
 async function manualImportZaimTransactions(){
-  if(!ZAIM_TXN_API_KEY){ alert("まだ準備中です。"); return; }
   const n=await importZaimTransactions(true);
   alert(n+"件の取引を取り込みました。");
 }
 async function importZaimTransactions(manual){
-  if(!ZAIM_TXN_API_KEY) return 0;
   try{
-    const res=await fetch(ZAIM_TXN_API_URL,{headers:{"X-API-Key":ZAIM_TXN_API_KEY}});
+    const known=new Set(db.transactions.filter(t=>t.zaimId!=null).map(t=>t.zaimId));
+    const latestDate=db.transactions.filter(t=>t.zaimId!=null).reduce((mx,t)=>t.date>mx?t.date:mx, "");
+    const url=ZAIM_TXN_API_URL+(latestDate?("?since="+latestDate):"");
+    const res=await fetch(url,{headers:{"X-API-Key":ZAIM_TXN_API_KEY}});
     if(!res.ok) throw new Error("http "+res.status);
     const list=await res.json();
-    const known=new Set(db.transactions.filter(t=>t.zaimId!=null).map(t=>t.zaimId));
     const allCats=EXP_CATS.concat(INC_CATS);
     let added=0;
     list.forEach(t=>{
