@@ -160,6 +160,9 @@
       </div>
     </div>
 
+    <h2>カードの利用ペース</h2>
+    <div class="card" id="z-pace"></div>
+
     <h2>総資産</h2>
     <div class="tiles">
       <div class="tile hero" style="grid-column:1/3;">
@@ -435,7 +438,8 @@ async function importZaimTransactions(manual){
         id:uid(), zaimId:t.zaimId, date:t.date, amount:+t.amount||0,
         kind:t.kind==="income"?"income":"expense", category,
         memo:[t.place,t.memo].filter(Boolean).join(" "),
-        scope:t.scope==="family"?"family":"personal", accountId:""
+        scope:t.scope==="family"?"family":"personal", accountId:"",
+        zaimAccount:t.account||""
       });
       known.add(t.zaimId); added++;
     });
@@ -837,6 +841,53 @@ const pDate=s=>new Date(s+"T00:00:00");
 const daysInc=(a,b)=>Math.round((pDate(b)-pDate(a))/86400000)+1;
 const minDate=(a,b)=>a<b?a:b;
 const spd=n=>yen(n)+" /日";
+
+/* ---------- カード利用ペース予測（楽天・リクルート、取引明細ベース） ---------- */
+const FAMILY_CARDS=[
+  {label:"楽天カード", match:"楽天カード", closeDay:"month_end"},
+  {label:"リクルートカード", match:"リクルートカード", closeDay:15},
+];
+function cardCycle(card, baseDate){
+  const d=pDate(baseDate);
+  if(card.closeDay==="month_end"){
+    const y=d.getFullYear(), m=d.getMonth();
+    return {start:fmtDate(new Date(y,m,1)), end:fmtDate(new Date(y,m+1,0))};
+  }
+  const cd=card.closeDay, y=d.getFullYear(), m=d.getMonth(), day=d.getDate();
+  if(day<=cd) return {start:fmtDate(new Date(y,m-1,cd+1)), end:fmtDate(new Date(y,m,cd))};
+  return {start:fmtDate(new Date(y,m,cd+1)), end:fmtDate(new Date(y,m+1,cd))};
+}
+function prevCardCycle(card, cycle){
+  const s=pDate(cycle.start);
+  return cardCycle(card, fmtDate(new Date(s.getFullYear(), s.getMonth()-1, 15)));
+}
+function cardPace(card){
+  const t=today();
+  const cur=cardCycle(card, t);
+  const prev=prevCardCycle(card, cur);
+  const sum=(start,end)=>db.transactions.filter(x=>x.kind==="expense" && x.zaimAccount && x.zaimAccount.includes(card.match) && x.date>=start && x.date<=end).reduce((s,x)=>s+x.amount,0);
+  const curAmt=sum(cur.start,cur.end);
+  const prevAmt=sum(prev.start,prev.end);
+  const totalDays=daysInc(cur.start,cur.end);
+  const elapsed=Math.min(totalDays, Math.max(1, daysInc(cur.start, minDate(t,cur.end))));
+  const projected=Math.round(curAmt/elapsed*totalDays);
+  return {label:card.label, curAmt, projected, prevAmt, cycleEnd:cur.end};
+}
+function renderCardPace(){
+  const el=document.getElementById("z-pace"); if(!el) return;
+  el.innerHTML=FAMILY_CARDS.map(cardPace).map(r=>{
+    const diff=r.prevAmt>0 ? Math.round((r.projected-r.prevAmt)/r.prevAmt*100) : null;
+    const diffTxt=diff==null ? "比較対象なし" : (diff>=0?`前回比+${diff}%`:`前回比${diff}%`);
+    const color=diff==null ? "var(--muted)" : (diff>0?"var(--red)":"var(--green)");
+    return `<div class="row" style="padding:9px 0;">
+      <div class="main"><span class="name">${r.label}</span><span class="sub">${r.cycleEnd.slice(5).replace("-","/")}締め予定</span></div>
+      <div style="text-align:right;">
+        <div style="font-size:14px;">${yen(r.curAmt)}<span style="font-size:11px; color:var(--muted);"> 確定分</span></div>
+        <div style="font-size:12px; color:${color};">着地予想 ${yen(r.projected)}　${diffTxt}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
 
 function goalCalc(b){
   const t=today();
@@ -1668,7 +1719,7 @@ document.querySelectorAll("#spend-seg button").forEach(b=>{b.onclick=()=>setSpen
 
 /* ---------- util ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function renderAll(){renderDash(); renderAssets(); renderZaim(); renderCharges(); renderLoans(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
+function renderAll(){renderDash(); renderAssets(); renderZaim(); renderCardPace(); renderCharges(); renderLoans(); renderBudget(); renderQuick(); renderGoals(); renderSettings();}
 renderAll();
 refreshZaimTotal();
 importZaimTransactions();
