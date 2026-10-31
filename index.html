@@ -1565,6 +1565,7 @@ function buildDeductionShareText(r,v){
   if(r.plan.length) r.plan.forEach(p=>lines.push(`${p[0]} → ${p[1]}: ${yen(p[2])}`));
   else lines.push("振込は不要です。");
   if(r.note) lines.push(`⚠️ ${r.note}`);
+  if(v.husband_advance||v.wife_advance) lines.push(`立替金: 夫${yen(v.husband_advance)} / 妻${yen(v.wife_advance)}`);
   lines.push(`夫 合計: ${yen(r.hTotal)} / 妻 合計: ${yen(r.wTotal)}`);
   return lines.join("\n");
 }
